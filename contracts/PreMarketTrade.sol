@@ -26,7 +26,6 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     );
 
     // ============ State Variables ============
-    uint256 public constant GRACE_PERIOD = 3 days;
     uint256 public tradeCounter;
     
     /**
@@ -35,12 +34,25 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      */
     EscrowVault public immutable vault;
     
+    // ============ Token Market ============
+    struct TokenInfo {
+        bytes32 tokenId;
+        string symbol;
+        string name;
+        address realAddress; // address(0) nếu chưa map
+        uint256 mappingTime;
+        uint256 settleTimeLimit; // seconds
+    }
+
+    mapping(bytes32 => TokenInfo) public tokens;
+
     // ============ Structs ============
     
     /**
      * @notice Cấu trúc đơn hàng pre-market
      * @param trader Địa chỉ người giao dịch
      * @param collateralToken Token dùng làm tài sản thế chấp
+     * @param targetTokenId ID của token thật sẽ được giao
      * @param amount Số lượng token thật sẽ giao dịch
      * @param price Giá per unit (trong collateral token)
      * @param isBuy true = BUY order, false = SELL order
@@ -50,6 +62,7 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     struct PreOrder {
         address trader;
         address collateralToken;
+        bytes32 targetTokenId; // Thay vì address
         uint256 amount;
         uint256 price;
         bool isBuy;
@@ -112,6 +125,9 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      */
     event TradeCancelled(uint256 indexed tradeId, address buyer);
 
+    event TokenMarketCreated(bytes32 indexed tokenId, string symbol, string name, uint256 settleTimeLimit);
+    event SettleTimeUpdated(bytes32 indexed tokenId, uint256 oldSettleTime, uint256 newSettleTime);
+
     // ============ Errors ============
     error InvalidSignature();
     error OrderExpired();
@@ -154,56 +170,24 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         bytes calldata sigBuy,
         bytes calldata sigSell
     ) external onlyRole(RELAYER_ROLE) nonReentrant returns (uint256 tradeId) {
-        // Validate orders compatibility
         _validateOrdersCompatibility(buyOrder, sellOrder);
-        
-        // Verify signatures
         _verifySignature(buyOrder, sigBuy);
         _verifySignature(sellOrder, sigSell);
-        
-        // Mark nonces as used
         usedNonces[buyOrder.trader][buyOrder.nonce] = true;
         usedNonces[sellOrder.trader][sellOrder.nonce] = true;
-        
-        // Calculate collateral needed
         uint256 collateralAmount = buyOrder.amount * buyOrder.price;
-        
-        // Slash balance from vault instead of direct transferFrom
-        // Buyer cần deposit collateral để trả cho seller
-        vault.slashBalance(
-            buyOrder.trader,
-            buyOrder.collateralToken,
-            collateralAmount
-        );
-        
-        // Seller cũng cần deposit collateral như tài sản thế chấp
-        vault.slashBalance(
-            sellOrder.trader,
-            sellOrder.collateralToken,
-            collateralAmount
-        );
-        
-        // Update locked collateral tracking
+        vault.slashBalance(buyOrder.trader, buyOrder.collateralToken, collateralAmount);
+        vault.slashBalance(sellOrder.trader, sellOrder.collateralToken, collateralAmount);
         lockedCollateral[buyOrder.collateralToken] += collateralAmount * 2;
-        
-        // Create matched trade
         tradeId = ++tradeCounter;
         trades[tradeId] = MatchedTrade({
             buyer: buyOrder,
             seller: sellOrder,
-            targetToken: address(0), // Will be set during settlement
+            targetToken: address(0),
             matchTime: block.timestamp,
             settled: false
         });
-        
-        emit OrdersMatched(
-            tradeId,
-            buyOrder.trader,
-            sellOrder.trader,
-            buyOrder.amount,
-            buyOrder.price,
-            buyOrder.collateralToken
-        );
+        emit OrdersMatched(tradeId, buyOrder.trader, sellOrder.trader, buyOrder.amount, buyOrder.price, buyOrder.collateralToken);
     }
 
     /**
@@ -212,42 +196,23 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      * @param tradeId ID của giao dịch cần settle
      * @param targetToken Địa chỉ token thật được giao
      */
-    function settle(uint256 tradeId, address targetToken) 
-        external 
-        nonReentrant 
-    {
+    function settle(uint256 tradeId, address targetToken) external nonReentrant {
         MatchedTrade storage trade = trades[tradeId];
-        
-        // Validate settlement conditions
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.seller.trader) revert OnlySellerCanSettle();
-        if (block.timestamp > trade.matchTime + GRACE_PERIOD) {
+        bytes32 tokenId = trade.buyer.targetTokenId;
+        require(tokens[tokenId].settleTimeLimit > 0, "Token not exists");
+        uint256 settleTimeLimit = tokens[tokenId].settleTimeLimit;
+        if (block.timestamp > trade.matchTime + settleTimeLimit) {
             revert GracePeriodNotExpired();
         }
-        
-        // Calculate amounts
         uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
-        
-        // Transfer target token from seller to buyer (vẫn cần transferFrom thật)
-        IERC20(targetToken).safeTransferFrom(
-            trade.seller.trader,
-            trade.buyer.trader,
-            trade.buyer.amount
-        );
-        
-        // Credit tất cả collateral cho seller (payment + refund)
-        vault.transferOut(
-            trade.buyer.collateralToken,
-            trade.seller.trader,
-            collateralAmount * 2
-        );
-        
-        // Update state
+        IERC20(targetToken).safeTransferFrom(trade.seller.trader, trade.buyer.trader, trade.buyer.amount);
+        vault.transferOut(trade.buyer.collateralToken, trade.seller.trader, collateralAmount * 2);
         trade.settled = true;
         trade.targetToken = targetToken;
         lockedCollateral[trade.buyer.collateralToken] -= collateralAmount * 2;
-        
         emit TradeSettled(tradeId, targetToken);
     }
 
@@ -256,34 +221,21 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      * @dev Chỉ buyer mới có thể cancel và chỉ sau khi grace period hết hạn
      * @param tradeId ID của giao dịch cần cancel
      */
-    function cancelAfterGracePeriod(uint256 tradeId) 
-        external 
-        nonReentrant 
-    {
+    function cancelAfterGracePeriod(uint256 tradeId) external nonReentrant {
         MatchedTrade storage trade = trades[tradeId];
-        
-        // Validate cancellation conditions
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.buyer.trader) revert OnlyBuyerCanCancel();
-        if (block.timestamp <= trade.matchTime + GRACE_PERIOD) {
+        bytes32 tokenId = trade.buyer.targetTokenId;
+        require(tokens[tokenId].settleTimeLimit > 0, "Token not exists");
+        uint256 settleTimeLimit = tokens[tokenId].settleTimeLimit;
+        if (block.timestamp <= trade.matchTime + settleTimeLimit) {
             revert GracePeriodNotExpired();
         }
-        
-        // Calculate collateral amount
         uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
-        
-        // Credit tất cả collateral về buyer (penalty cho seller)
-        vault.transferOut(
-            trade.buyer.collateralToken,
-            trade.buyer.trader,
-            collateralAmount * 2
-        );
-        
-        // Update state
-        trade.settled = true; // Mark as settled to prevent further actions
+        vault.transferOut(trade.buyer.collateralToken, trade.buyer.trader, collateralAmount * 2);
+        trade.settled = true;
         lockedCollateral[trade.buyer.collateralToken] -= collateralAmount * 2;
-        
         emit TradeCancelled(tradeId, trade.buyer.trader);
     }
 
@@ -411,5 +363,33 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         onlyRole(DEFAULT_ADMIN_ROLE) 
     {
         IERC20(token).safeTransfer(msg.sender, amount);
+    }
+
+    function createTokenMarket(
+        string calldata symbol,
+        string calldata name,
+        uint256 settleTimeLimit
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (bytes32 tokenId) {
+        require(settleTimeLimit >= 1 hours && settleTimeLimit <= 30 days, "Invalid settle time");
+        tokenId = keccak256(abi.encodePacked(symbol, name, block.chainid, msg.sender, block.timestamp));
+        require(tokens[tokenId].settleTimeLimit == 0, "TokenId exists");
+        tokens[tokenId] = TokenInfo({
+            tokenId: tokenId,
+            symbol: symbol,
+            name: name,
+            realAddress: address(0),
+            mappingTime: 0,
+            settleTimeLimit: settleTimeLimit
+        });
+        emit TokenMarketCreated(tokenId, symbol, name, settleTimeLimit);
+    }
+
+    function updateSettleTime(bytes32 tokenId, uint256 newSettleTime) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(tokens[tokenId].settleTimeLimit > 0, "Token not exists");
+        require(newSettleTime >= 1 hours && newSettleTime <= 30 days, "Invalid settle time");
+        require(tokens[tokenId].realAddress == address(0), "Cannot update mapped token");
+        uint256 oldSettleTime = tokens[tokenId].settleTimeLimit;
+        tokens[tokenId].settleTimeLimit = newSettleTime;
+        emit SettleTimeUpdated(tokenId, oldSettleTime, newSettleTime);
     }
 } 
