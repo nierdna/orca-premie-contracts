@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "./EscrowVault.sol";
 
 /**
  * @title PreMarketTrade
@@ -27,6 +28,12 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     // ============ State Variables ============
     uint256 public constant GRACE_PERIOD = 3 days;
     uint256 public tradeCounter;
+    
+    /**
+     * @notice Reference đến EscrowVault contract
+     * @dev Vault quản lý balance nội bộ thay vì transferFrom trực tiếp
+     */
+    EscrowVault public immutable vault;
     
     // ============ Structs ============
     
@@ -121,9 +128,11 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     // ============ Constructor ============
     
     /**
-     * @notice Khởi tạo contract với domain separator cho EIP-712
+     * @notice Khởi tạo contract với domain separator cho EIP-712 và vault address
+     * @param _vault Địa chỉ của EscrowVault contract
      */
-    constructor() EIP712("PreMarketTrade", "1") {
+    constructor(address _vault) EIP712("PreMarketTrade", "1") {
+        vault = EscrowVault(_vault);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(RELAYER_ROLE, msg.sender);
     }
@@ -159,16 +168,18 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         // Calculate collateral needed
         uint256 collateralAmount = buyOrder.amount * buyOrder.price;
         
-        // Lock collateral from both parties
-        IERC20(buyOrder.collateralToken).safeTransferFrom(
+        // Slash balance from vault instead of direct transferFrom
+        // Buyer cần deposit collateral để trả cho seller
+        vault.slashBalance(
             buyOrder.trader,
-            address(this),
+            buyOrder.collateralToken,
             collateralAmount
         );
         
-        IERC20(sellOrder.collateralToken).safeTransferFrom(
+        // Seller cũng cần deposit collateral như tài sản thế chấp
+        vault.slashBalance(
             sellOrder.trader,
-            address(this),
+            sellOrder.collateralToken,
             collateralAmount
         );
         
@@ -218,15 +229,16 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         // Calculate amounts
         uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
         
-        // Transfer target token from seller to buyer
+        // Transfer target token from seller to buyer (vẫn cần transferFrom thật)
         IERC20(targetToken).safeTransferFrom(
             trade.seller.trader,
             trade.buyer.trader,
             trade.buyer.amount
         );
         
-        // Release all collateral to seller (including buyer's collateral as payment)
-        IERC20(trade.buyer.collateralToken).safeTransfer(
+        // Credit tất cả collateral cho seller (payment + refund)
+        vault.transferOut(
+            trade.buyer.collateralToken,
             trade.seller.trader,
             collateralAmount * 2
         );
@@ -261,8 +273,9 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         // Calculate collateral amount
         uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
         
-        // Return all collateral to buyer as penalty for seller
-        IERC20(trade.buyer.collateralToken).safeTransfer(
+        // Credit tất cả collateral về buyer (penalty cho seller)
+        vault.transferOut(
+            trade.buyer.collateralToken,
             trade.buyer.trader,
             collateralAmount * 2
         );
