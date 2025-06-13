@@ -24,7 +24,7 @@ const config = {
             url: process.env.BASE_SEPOLIA_RPC_URL || "",
             accounts:
                 process.env.PRIVATE_KEY !== undefined
-                    ? [process.env.PRIVATE_KEY, process.env.OPERATOR_PRIVATE_KEY!].filter(
+                    ? [process.env.PRIVATE_KEY, process.env.BUYER_PRIVATE_KEY!, process.env.SELLER_PRIVATE_KEY!].filter(
                         Boolean
                     )
                     : [],
