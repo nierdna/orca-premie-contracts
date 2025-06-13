@@ -7,6 +7,9 @@ import { PreMarketTrade } from "../typechain-types";
  * @dev Sử dụng EIP-712 signatures và hỗ trợ partial fill
  */
 
+// Constants
+const DECIMALS = 6; // USDC decimals
+
 interface OrderInfo {
     trader: string;
     collateralToken: string;
@@ -227,12 +230,12 @@ async function matchOrders(config: MatchOrdersConfig) {
                         console.log(`👤 Buyer: ${parsedLog.args.buyer}`);
                         console.log(`👤 Seller: ${parsedLog.args.seller}`);
                         console.log(`🪙 Target Token ID: ${parsedLog.args.targetTokenId}`);
-                        console.log(`📈 Amount: ${ethers.formatEther(parsedLog.args.amount)}`);
-                        console.log(`💰 Price: ${ethers.formatEther(parsedLog.args.price)}`);
+                        console.log(`📈 Amount: ${ethers.formatUnits(parsedLog.args.amount, DECIMALS)}`);
+                        console.log(`💰 Price: ${ethers.formatUnits(parsedLog.args.price, DECIMALS)}`);
                         console.log(`🪙 Collateral Token: ${parsedLog.args.collateralToken}`);
-                        console.log(`📊 Filled Amount: ${ethers.formatEther(parsedLog.args.filledAmount)}`);
-                        console.log(`💎 Buyer Collateral: ${ethers.formatEther(parsedLog.args.buyerCollateral)}`);
-                        console.log(`💎 Seller Collateral: ${ethers.formatEther(parsedLog.args.sellerCollateral)}`);
+                        console.log(`📊 Filled Amount: ${ethers.formatUnits(parsedLog.args.filledAmount, DECIMALS)}`);
+                        console.log(`💎 Buyer Collateral: ${ethers.formatUnits(parsedLog.args.buyerCollateral, DECIMALS)}`);
+                        console.log(`💎 Seller Collateral: ${ethers.formatUnits(parsedLog.args.sellerCollateral, DECIMALS)}`);
 
                         // Get trade info
                         const tradeInfo = await preMarketTrade.trades(tradeId);
@@ -275,18 +278,18 @@ async function main() {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
 
     // Example token ID (thay bằng token ID thực từ script 1)
-    const targetTokenId = "0x1234567890123456789012345678901234567890123456789012345678901234";
+    const targetTokenId = "0xf8460328616af0c6a7221b213e7956d730d005e0b281f473b32be4bfa16ae987";
 
     // Example USDC address (thay bằng address thực)
-    const usdcAddress = "0xA0b86a33E6426c8bf8fB4b6E2b78BB9db20CEaE3";
+    const usdcAddress = process.env.USDC_ADDRESS || "0xA0b86a33E6426c8bf8fB4b6E2b78BB9db20CEaE3";
 
     const example: MatchOrdersConfig = {
         buyOrder: {
             trader: buyer.address,
             collateralToken: usdcAddress,
             targetTokenId: targetTokenId,
-            amount: ethers.parseEther("1000").toString(), // 1000 tokens
-            price: ethers.parseEther("0.5").toString(), // 0.5 USDC per token
+            amount: ethers.parseUnits("10", DECIMALS).toString(), // 10 tokens
+            price: ethers.parseUnits("0.5", DECIMALS).toString(), // 0.5 USDC per token
             isBuy: true,
             nonce: "1",
             deadline: deadline.toString()
@@ -295,13 +298,13 @@ async function main() {
             trader: seller.address,
             collateralToken: usdcAddress,
             targetTokenId: targetTokenId,
-            amount: ethers.parseEther("1000").toString(), // 1000 tokens
-            price: ethers.parseEther("0.4").toString(), // 0.4 USDC per token
+            amount: ethers.parseUnits("10", DECIMALS).toString(), // 10 tokens
+            price: ethers.parseUnits("0.5", DECIMALS).toString(), // 0.5 USDC per token
             isBuy: false,
             nonce: "1",
             deadline: deadline.toString()
         },
-        fillAmount: ethers.parseEther("500").toString() // Fill 500 tokens
+        fillAmount: ethers.parseUnits("5", DECIMALS).toString() // Fill 5 tokens
     };
 
     console.log("🎯 Matching orders with configuration:");
