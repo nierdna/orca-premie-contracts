@@ -155,3 +155,6 @@ Smart contract này chưa được audit bởi bên thứ ba. Sử dụng trên 
 ---
 
 **Được xây dựng bởi Blockchain Expert Team** 🧠⚡ 
+
+
+Review lại contract trên để biết contract chỉ phục vụ match các order có amount bằng nhau, giá bằng nhau. Tôi muốn mở rộng contract trên thành match từng phần 

@@ -22,7 +22,7 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     // ============ Constants ============
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
     bytes32 public constant PREORDER_TYPEHASH = keccak256(
-        "PreOrder(address trader,address collateralToken,uint256 amount,uint256 price,bool isBuy,uint256 nonce,uint256 deadline)"
+        "PreOrder(address trader,address collateralToken,bytes32 targetTokenId,uint256 amount,uint256 price,bool isBuy,uint256 nonce,uint256 deadline)"
     );
 
     // ============ State Variables ============
@@ -77,6 +77,7 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      * @param targetToken Địa chỉ token thật sẽ được giao
      * @param matchTime Thời điểm khớp lệnh
      * @param settled Trạng thái đã settle hay chưa
+     * @param filledAmount Số lượng đã được fill trong trade này
      */
     struct MatchedTrade {
         PreOrder buyer;
@@ -84,12 +85,25 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         address targetToken;
         uint256 matchTime;
         bool settled;
+        uint256 filledAmount;
     }
 
     // ============ Storage ============
     mapping(uint256 => MatchedTrade) public trades;
     mapping(address => mapping(uint256 => bool)) public usedNonces;
     mapping(address => uint256) public lockedCollateral;
+    
+    // ============ PARTIAL FILL TRACKING ============
+    /**
+     * @notice Track filled amount cho mỗi order
+     * @dev orderHash => filled amount
+     */    
+    mapping(bytes32 => uint256) public orderFilled;
+    
+    /**
+     * @notice Minimum fill amount để tránh dust orders
+     */
+    uint256 public minimumFillAmount = 1e15; // 0.001 token default
 
     // ============ Events ============
     
@@ -101,6 +115,9 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      * @param amount Số lượng token
      * @param price Giá giao dịch
      * @param collateralToken Token thế chấp
+     * @param filledAmount Số lượng được fill trong lần match này
+     * @param buyerTotalFilled Tổng số lượng buyer đã fill
+     * @param sellerTotalFilled Tổng số lượng seller đã fill
      */
     event OrdersMatched(
         uint256 indexed tradeId,
@@ -108,7 +125,10 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         address indexed seller,
         uint256 amount,
         uint256 price,
-        address collateralToken
+        address collateralToken,
+        uint256 filledAmount,
+        uint256 buyerTotalFilled,
+        uint256 sellerTotalFilled
     );
 
     /**
@@ -140,6 +160,9 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     error OnlyBuyerCanCancel();
     error OnlySellerCanSettle();
     error TokenTransferFailed();
+    error InvalidFillAmount();
+    error ExceedOrderAmount();
+    error BelowMinimumFill();
 
     // ============ Constructor ============
     
@@ -156,38 +179,154 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     // ============ External Functions ============
 
     /**
-     * @notice Khớp hai lệnh buy/sell hợp lệ
+     * @notice Khớp hai lệnh buy/sell hợp lệ với partial fill support
      * @dev Chỉ relayer được phép gọi function này
      * @param buyOrder Order của buyer
-     * @param sellOrder Order của seller
+     * @param sellOrder Order của seller  
      * @param sigBuy Chữ ký của buyer
      * @param sigSell Chữ ký của seller
+     * @param fillAmount Số lượng muốn fill (0 = auto calculate max possible)
      * @return tradeId ID của giao dịch mới tạo
      */
-    function matchOrders(
+    function matchOrdersWithAmount(
         PreOrder calldata buyOrder,
         PreOrder calldata sellOrder,
         bytes calldata sigBuy,
-        bytes calldata sigSell
+        bytes calldata sigSell,
+        uint256 fillAmount
     ) external onlyRole(RELAYER_ROLE) nonReentrant returns (uint256 tradeId) {
+        // Basic validations
         _validateOrdersCompatibility(buyOrder, sellOrder);
         _verifySignature(buyOrder, sigBuy);
         _verifySignature(sellOrder, sigSell);
-        usedNonces[buyOrder.trader][buyOrder.nonce] = true;
-        usedNonces[sellOrder.trader][sellOrder.nonce] = true;
-        uint256 collateralAmount = buyOrder.amount * buyOrder.price;
+        
+        // Calculate and validate fill amount
+        uint256 actualFillAmount = _calculateFillAmount(buyOrder, sellOrder, fillAmount);
+        if (actualFillAmount == 0) revert InvalidFillAmount();
+        if (actualFillAmount < minimumFillAmount) revert BelowMinimumFill();
+        
+        // Process the fill
+        return _processFill(buyOrder, sellOrder, actualFillAmount);
+    }
+    
+    /**
+     * @dev Internal function to process the actual fill
+     */
+    function _processFill(
+        PreOrder calldata buyOrder,
+        PreOrder calldata sellOrder,
+        uint256 actualFillAmount
+    ) internal returns (uint256 tradeId) {
+        // Update filled tracking
+        bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
+        bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
+        
+        orderFilled[buyOrderHash] += actualFillAmount;
+        orderFilled[sellOrderHash] += actualFillAmount;
+        
+        // Check if orders are fully filled, then mark nonce as used
+        if (orderFilled[buyOrderHash] == buyOrder.amount) {
+            usedNonces[buyOrder.trader][buyOrder.nonce] = true;
+        }
+        if (orderFilled[sellOrderHash] == sellOrder.amount) {
+            usedNonces[sellOrder.trader][sellOrder.nonce] = true;
+        }
+        
+        // Lock collateral for this fill
+        uint256 collateralAmount = actualFillAmount * buyOrder.price;
         vault.slashBalance(buyOrder.trader, buyOrder.collateralToken, collateralAmount);
         vault.slashBalance(sellOrder.trader, sellOrder.collateralToken, collateralAmount);
         lockedCollateral[buyOrder.collateralToken] += collateralAmount * 2;
+        
+        // Create trade record
         tradeId = ++tradeCounter;
         trades[tradeId] = MatchedTrade({
             buyer: buyOrder,
             seller: sellOrder,
             targetToken: address(0),
             matchTime: block.timestamp,
-            settled: false
+            settled: false,
+            filledAmount: actualFillAmount
         });
-        emit OrdersMatched(tradeId, buyOrder.trader, sellOrder.trader, buyOrder.amount, buyOrder.price, buyOrder.collateralToken);
+        
+        emit OrdersMatched(
+            tradeId, 
+            buyOrder.trader, 
+            sellOrder.trader, 
+            buyOrder.amount, 
+            buyOrder.price, 
+            buyOrder.collateralToken,
+            actualFillAmount,
+            orderFilled[buyOrderHash],
+            orderFilled[sellOrderHash]
+        );
+    }
+
+    /**
+     * @notice Backward compatibility - khớp với toàn bộ amount
+     * @dev Wrapper function cho relayer cũ
+     */  
+    function matchOrders(
+        PreOrder calldata buyOrder,
+        PreOrder calldata sellOrder,
+        bytes calldata sigBuy,
+        bytes calldata sigSell
+    ) external onlyRole(RELAYER_ROLE) nonReentrant returns (uint256 tradeId) {
+        // Basic validations
+        _validateOrdersCompatibility(buyOrder, sellOrder);
+        _verifySignature(buyOrder, sigBuy);
+        _verifySignature(sellOrder, sigSell);
+        
+        // Calculate actual fill amount for full match
+        uint256 actualFillAmount = _calculateFillAmount(buyOrder, sellOrder, 0);
+        
+        // Validate fill amount
+        if (actualFillAmount == 0) revert InvalidFillAmount();
+        if (actualFillAmount < minimumFillAmount) revert BelowMinimumFill();
+        
+        // Update filled tracking
+        bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
+        bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
+        
+        orderFilled[buyOrderHash] += actualFillAmount;
+        orderFilled[sellOrderHash] += actualFillAmount;
+        
+        // Check if orders are fully filled, then mark nonce as used
+        if (orderFilled[buyOrderHash] == buyOrder.amount) {
+            usedNonces[buyOrder.trader][buyOrder.nonce] = true;
+        }
+        if (orderFilled[sellOrderHash] == sellOrder.amount) {
+            usedNonces[sellOrder.trader][sellOrder.nonce] = true;
+        }
+        
+        // Lock collateral for this fill
+        uint256 collateralAmount = actualFillAmount * buyOrder.price;
+        vault.slashBalance(buyOrder.trader, buyOrder.collateralToken, collateralAmount);
+        vault.slashBalance(sellOrder.trader, sellOrder.collateralToken, collateralAmount);
+        lockedCollateral[buyOrder.collateralToken] += collateralAmount * 2;
+        
+        // Create trade record
+        tradeId = ++tradeCounter;
+        trades[tradeId] = MatchedTrade({
+            buyer: buyOrder,
+            seller: sellOrder,
+            targetToken: address(0),
+            matchTime: block.timestamp,
+            settled: false,
+            filledAmount: actualFillAmount
+        });
+        
+        emit OrdersMatched(
+            tradeId, 
+            buyOrder.trader, 
+            sellOrder.trader, 
+            buyOrder.amount, 
+            buyOrder.price, 
+            buyOrder.collateralToken,
+            actualFillAmount,
+            orderFilled[buyOrderHash],
+            orderFilled[sellOrderHash]
+        );
     }
 
     /**
@@ -201,18 +340,32 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.seller.trader) revert OnlySellerCanSettle();
+        
         bytes32 tokenId = trade.buyer.targetTokenId;
         require(tokens[tokenId].settleTimeLimit > 0, "Token not exists");
+        
         uint256 settleTimeLimit = tokens[tokenId].settleTimeLimit;
         if (block.timestamp > trade.matchTime + settleTimeLimit) {
             revert GracePeriodNotExpired();
         }
-        uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
-        IERC20(targetToken).safeTransferFrom(trade.seller.trader, trade.buyer.trader, trade.buyer.amount);
+        
+        // Use actual filled amount instead of full order amount  
+        uint256 collateralAmount = trade.filledAmount * trade.buyer.price;
+        
+        // Transfer actual filled amount
+        IERC20(targetToken).safeTransferFrom(
+            trade.seller.trader, 
+            trade.buyer.trader, 
+            trade.filledAmount
+        );
+        
+        // Release collateral
         vault.transferOut(trade.buyer.collateralToken, trade.seller.trader, collateralAmount * 2);
+        
         trade.settled = true;
         trade.targetToken = targetToken;
         lockedCollateral[trade.buyer.collateralToken] -= collateralAmount * 2;
+        
         emit TradeSettled(tradeId, targetToken);
     }
 
@@ -226,16 +379,22 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.buyer.trader) revert OnlyBuyerCanCancel();
+        
         bytes32 tokenId = trade.buyer.targetTokenId;
         require(tokens[tokenId].settleTimeLimit > 0, "Token not exists");
+        
         uint256 settleTimeLimit = tokens[tokenId].settleTimeLimit;
         if (block.timestamp <= trade.matchTime + settleTimeLimit) {
             revert GracePeriodNotExpired();
         }
-        uint256 collateralAmount = trade.buyer.amount * trade.buyer.price;
+        
+        // Use actual filled amount
+        uint256 collateralAmount = trade.filledAmount * trade.buyer.price;
         vault.transferOut(trade.buyer.collateralToken, trade.buyer.trader, collateralAmount * 2);
+        
         trade.settled = true;
         lockedCollateral[trade.buyer.collateralToken] -= collateralAmount * 2;
+        
         emit TradeCancelled(tradeId, trade.buyer.trader);
     }
 
@@ -280,20 +439,49 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     {
         return _hashTypedDataV4(_getOrderStructHash(order));
     }
+    
+    /**
+     * @notice Lấy số lượng đã fill của một order
+     * @param orderHash Hash của order
+     * @return filled Số lượng đã fill
+     */
+    function getOrderFilledAmount(bytes32 orderHash) 
+        external 
+        view 
+        returns (uint256 filled) 
+    {
+        return orderFilled[orderHash];
+    }
+    
+    /**
+     * @notice Lấy số lượng còn lại có thể fill của một order
+     * @param order Order cần check
+     * @return remaining Số lượng còn lại
+     */
+    function getRemainingAmount(PreOrder calldata order) 
+        external 
+        view 
+        returns (uint256 remaining) 
+    {
+        bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
+        return order.amount - orderFilled[orderHash];
+    }
 
     // ============ Internal Functions ============
 
     /**
-     * @dev Validate tính tương thích của hai orders
+     * @dev Validate tính tương thích của hai orders (updated for partial fill)
      */
     function _validateOrdersCompatibility(
         PreOrder calldata buyOrder,
         PreOrder calldata sellOrder
     ) internal view {
         if (!buyOrder.isBuy || sellOrder.isBuy) revert IncompatibleOrders();
-        if (buyOrder.amount != sellOrder.amount) revert IncompatibleOrders();
         if (buyOrder.price != sellOrder.price) revert IncompatibleOrders();
         if (buyOrder.collateralToken != sellOrder.collateralToken) {
+            revert IncompatibleOrders();
+        }
+        if (buyOrder.targetTokenId != sellOrder.targetTokenId) {
             revert IncompatibleOrders();
         }
         if (block.timestamp > buyOrder.deadline) revert OrderExpired();
@@ -301,13 +489,47 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
     }
 
     /**
-     * @dev Verify chữ ký của order
+     * @dev Calculate actual fill amount based on remaining amounts
+     */
+    function _calculateFillAmount(
+        PreOrder calldata buyOrder,
+        PreOrder calldata sellOrder,
+        uint256 requestedFillAmount
+    ) internal view returns (uint256 actualFillAmount) {
+        bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
+        bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
+        
+        uint256 buyRemaining = buyOrder.amount - orderFilled[buyOrderHash];
+        uint256 sellRemaining = sellOrder.amount - orderFilled[sellOrderHash];
+        
+        if (buyRemaining == 0 || sellRemaining == 0) {
+            return 0;
+        }
+        
+        uint256 maxFillAmount = buyRemaining < sellRemaining ? buyRemaining : sellRemaining;
+        
+        if (requestedFillAmount == 0) {
+            // Auto calculate max possible
+            actualFillAmount = maxFillAmount;
+        } else {
+            // Use requested amount but not exceed max
+            actualFillAmount = requestedFillAmount > maxFillAmount ? maxFillAmount : requestedFillAmount;
+        }
+    }
+
+    /**
+     * @dev Verify chữ ký của order (updated for partial fill)
      */
     function _verifySignature(
         PreOrder calldata order,
         bytes calldata signature
     ) internal view {
+        // Check if order is fully filled (nonce used)
         if (usedNonces[order.trader][order.nonce]) revert OrderAlreadyUsed();
+        
+        // Check if order still has remaining amount
+        bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
+        if (orderFilled[orderHash] >= order.amount) revert OrderAlreadyUsed();
         
         bytes32 digest = _hashTypedDataV4(_getOrderStructHash(order));
         address signer = digest.recover(signature);
@@ -327,6 +549,7 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
             PREORDER_TYPEHASH,
             order.trader,
             order.collateralToken,
+            order.targetTokenId,
             order.amount,
             order.price,
             order.isBuy,
@@ -351,6 +574,14 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712 {
      */
     function removeRelayer(address relayer) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _revokeRole(RELAYER_ROLE, relayer);
+    }
+    
+    /**
+     * @notice Update minimum fill amount
+     * @param newMinimum New minimum fill amount
+     */
+    function setMinimumFillAmount(uint256 newMinimum) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        minimumFillAmount = newMinimum;
     }
 
     /**
