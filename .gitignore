@@ -15,3 +15,5 @@ cache
     
 
 /typechain-types
+
+.env

@@ -31,7 +31,7 @@ contract PreMarketTrade is
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
     
-    // ============ Constructor ============
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -65,10 +65,10 @@ contract PreMarketTrade is
     uint256 public constant MAX_PRICE = 1e30; // Very high but reasonable
     
     // ============ Economic Parameters ============
-    uint256 public buyerCollateralRatio = 100; // 100% of trade value
-    uint256 public sellerCollateralRatio = 100;  // 100% of trade value (asymmetric)
-    uint256 public sellerRewardBps = 0;        // 0% reward for fulfilling
-    uint256 public latePenaltyBps = 10000;        // 100% penalty for late settlement
+    uint256 public buyerCollateralRatio; // Will be set in initializer: 100% of trade value
+    uint256 public sellerCollateralRatio; // Will be set in initializer: 100% of trade value (asymmetric)
+    uint256 public sellerRewardBps; // Will be set in initializer: 0% reward for fulfilling
+    uint256 public latePenaltyBps; // Will be set in initializer: 100% penalty for late settlement
     
     // ============ Token Market ============
     struct TokenInfo {
@@ -145,7 +145,7 @@ contract PreMarketTrade is
     /**
      * @notice Minimum fill amount để tránh dust orders
      */
-    uint256 public minimumFillAmount = 1e15; // 0.001 token default
+    uint256 public minimumFillAmount; // Will be set in initializer: 0.001 token default
     
     /**
      * @notice Track locked collateral per user per token
@@ -310,6 +310,13 @@ contract PreMarketTrade is
         
         // Set vault (can't use immutable in upgradeable contracts)
         vault = EscrowVault(_vault);
+        
+        // Initialize economic parameters (moved from declaration to fix upgrade safety)
+        buyerCollateralRatio = 100; // 100% of trade value
+        sellerCollateralRatio = 100; // 100% of trade value (asymmetric)
+        sellerRewardBps = 0; // 0% reward for fulfilling
+        latePenaltyBps = 10000; // 100% penalty for late settlement
+        minimumFillAmount = 1e15; // 0.001 token default
         
         // Grant roles to admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);

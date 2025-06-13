@@ -1,5 +1,6 @@
 import "@nomicfoundation/hardhat-toolbox";
 import "@openzeppelin/hardhat-upgrades";
+import "dotenv/config";
 
 const config = {
     solidity: {
@@ -18,10 +19,32 @@ const config = {
         sepolia: {
             url: process.env.SEPOLIA_URL || "",
             accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
-        }
+        },
+        "base-sepolia": {
+            url: process.env.BASE_SEPOLIA_RPC_URL || "",
+            accounts:
+                process.env.PRIVATE_KEY !== undefined
+                    ? [process.env.PRIVATE_KEY, process.env.OPERATOR_PRIVATE_KEY!].filter(
+                        Boolean
+                    )
+                    : [],
+        },
     },
     etherscan: {
-        apiKey: process.env.ETHERSCAN_API_KEY
+        apiKey: {
+            sepolia: process.env.ETHERSCAN_API_KEY,
+            "base-sepolia": process.env.BASE_SEPOLIA_API_KEY || "",
+        },
+        customChains: [
+            {
+                network: "base-sepolia",
+                chainId: 84532,
+                urls: {
+                    apiURL: "https://api-sepolia.basescan.org/api",
+                    browserURL: "https://sepolia.basescan.org"
+                }
+            }
+        ]
     }
 };
 

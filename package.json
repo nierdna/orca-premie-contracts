@@ -13,6 +13,7 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomiclabs/hardhat-etherscan": "^3.1.8",
     "@openzeppelin/contracts": "^5.0.0",
     "@openzeppelin/hardhat-upgrades": "^3.9.0",
     "@typechain/hardhat": "^9.1.0",
@@ -31,6 +32,7 @@
   "author": "Blockchain Expert",
   "license": "MIT",
   "dependencies": {
-    "@openzeppelin/contracts-upgradeable": "^5.3.0"
+    "@openzeppelin/contracts-upgradeable": "^5.3.0",
+    "dotenv": "^16.5.0"
   }
 }
