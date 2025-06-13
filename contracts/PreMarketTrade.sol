@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import "./EscrowVault.sol";
 
 /**
@@ -17,9 +20,21 @@ import "./EscrowVault.sol";
  * @author Blockchain Expert
  * @custom:security-contact security@premarket.trade
  */
-contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
+contract PreMarketTrade is 
+    Initializable,
+    AccessControlUpgradeable, 
+    ReentrancyGuardUpgradeable, 
+    EIP712Upgradeable, 
+    PausableUpgradeable,
+    UUPSUpgradeable 
+{
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
+    
+    // ============ Constructor ============
+    constructor() {
+        _disableInitializers();
+    }
 
     // ============ Constants ============
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
@@ -35,8 +50,15 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
     /**
      * @notice Reference đến EscrowVault contract
      * @dev Vault quản lý balance nội bộ thay vì transferFrom trực tiếp
+     * @dev Không thể dùng immutable trong upgradeable contracts
      */
-    EscrowVault public immutable vault;
+    EscrowVault public vault;
+    
+    /**
+     * @notice Contract version for upgrade tracking
+     * @dev Increment này mỗi lần upgrade
+     */
+    string public constant VERSION = "1.0.0";
     
     // ============ Price Bounds ============
     uint256 public constant MIN_PRICE = 1e12; // 0.000001 token (6 decimals)
@@ -237,6 +259,12 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
         uint256 tradeId
     );
 
+    event ContractUpgraded(
+        address indexed oldImplementation,
+        address indexed newImplementation,
+        string version
+    );
+
     // ============ Errors ============
     error InvalidSignature();
     error OrderExpired();
@@ -262,18 +290,31 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
     error ZeroAmount();
     error SelfTrade();
 
-    // ============ Constructor ============
+    // ============ Initializer ============
     
     /**
-     * @notice Khởi tạo contract với domain separator cho EIP-712 và vault address
+     * @notice Initialize contract với domain separator cho EIP-712 và vault address
      * @param _vault Địa chỉ của EscrowVault contract
+     * @param _admin Địa chỉ admin sẽ nhận các role
      */
-    constructor(address _vault) EIP712("PreMarketTrade", "1") {
+    function initialize(address _vault, address _admin) public initializer {
         if (_vault == address(0)) revert InvalidTokenAddress();
+        if (_admin == address(0)) revert InvalidTokenAddress();
+        
+        // Initialize parent contracts
+        __AccessControl_init();
+        __ReentrancyGuard_init();
+        __EIP712_init("PreMarketTrade", "1");
+        __Pausable_init();
+        __UUPSUpgradeable_init();
+        
+        // Set vault (can't use immutable in upgradeable contracts)
         vault = EscrowVault(_vault);
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(RELAYER_ROLE, msg.sender);
-        _grantRole(EMERGENCY_ROLE, msg.sender);
+        
+        // Grant roles to admin
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+        _grantRole(RELAYER_ROLE, _admin);
+        _grantRole(EMERGENCY_ROLE, _admin);
     }
 
     // ============ External Functions ============
@@ -316,7 +357,7 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
         PreOrder calldata buyOrder,
         PreOrder calldata sellOrder,
         uint256 actualFillAmount
-    ) internal returns (uint256 tradeId) {
+    ) internal virtual returns (uint256 tradeId) {
         // Cache order hashes to save gas
         bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
         bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
@@ -951,4 +992,62 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
         TokenInfo memory tokenInfo = tokens[tokenId];
         return (tokenInfo.realAddress != address(0), tokenInfo.realAddress);
     }
+
+    // ============ Upgrade Authorization ============
+    
+    /**
+     * @notice Authorize upgrade - chỉ admin mới được upgrade
+     * @dev Override từ UUPSUpgradeable để kiểm soát quyền upgrade
+     * @param newImplementation Địa chỉ implementation mới
+     */
+    function _authorizeUpgrade(address newImplementation) 
+        internal 
+        override 
+        onlyRole(DEFAULT_ADMIN_ROLE) 
+    {
+        // Enhanced security checks
+        require(newImplementation != address(0), "Invalid implementation");
+        require(newImplementation != address(this), "Cannot upgrade to self");
+        require(newImplementation.code.length > 0, "Implementation must be contract");
+        
+        // Emit upgrade event
+        address oldImplementation = ERC1967Utils.getImplementation();
+        emit ContractUpgraded(oldImplementation, newImplementation, VERSION);
+    }
+
+    /**
+     * @notice Get current implementation address
+     * @return implementation Current implementation address
+     */
+    function getImplementation() external view returns (address implementation) {
+        return ERC1967Utils.getImplementation();
+    }
+
+    // ============ Storage Gap ============
+    
+    /**
+     * @notice Storage gap để tránh collision khi upgrade
+     * @dev Giảm số này khi thêm state variables mới
+     * 
+     * Current state variables:
+     * - tradeCounter: 1 slot
+     * - tokenIdCounter: 1 slot  
+     * - vault: 1 slot
+     * - buyerCollateralRatio: 1 slot
+     * - sellerCollateralRatio: 1 slot
+     * - sellerRewardBps: 1 slot
+     * - latePenaltyBps: 1 slot
+     * - minimumFillAmount: 1 slot
+     * - tokens: 1 slot
+     * - symbolToTokenId: 1 slot
+     * - trades: 1 slot
+     * - usedOrderHashes: 1 slot
+     * - orderFilled: 1 slot
+     * - userLockedCollateral: 1 slot
+     * - totalLockedCollateral: 1 slot
+     * 
+     * Total used: ~15 slots
+     * Reserved: 49 slots (đã trừ đi VERSION constant)
+     */
+    uint256[49] private __gap;
 } 
