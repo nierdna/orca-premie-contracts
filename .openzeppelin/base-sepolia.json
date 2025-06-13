@@ -5,6 +5,16 @@
       "address": "0x4E18BdA62EDb10000408a783f3e58ca2bADA8b5C",
       "txHash": "0xbaac5f1f7b05132f7c59eadd2aa3a1734d6e33736a8a3970e71131c38070e4c6",
       "kind": "uups"
+    },
+    {
+      "address": "0x1bfaF47F4bc70772121d3ee8724Cad36557C7a79",
+      "txHash": "0xaea14145dcdfff461a0bff6f770adc17f5b344d5e36ff43d5dc14d56fd661c9e",
+      "kind": "uups"
+    },
+    {
+      "address": "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585",
+      "txHash": "0xe77f0de42cd1f5e57187196d74d532e1202890d35bb6e1e72d1d00490739b861",
+      "kind": "uups"
     }
   ],
   "impls": {
@@ -427,6 +437,1124 @@
             "numberOfBytes": "256"
           },
           "t_struct(TokenInfo)9536_storage": {
+            "label": "struct PreMarketTrade.TokenInfo",
+            "members": [
+              {
+                "label": "tokenId",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "symbol",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "realAddress",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "mappingTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "settleTimeLimit",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "exists",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "7"
+              }
+            ],
+            "numberOfBytes": "256"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.EIP712": [
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedName",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:39",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedVersion",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:41",
+              "offset": 0,
+              "slot": "1"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_name",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:43",
+              "offset": 0,
+              "slot": "2"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_version",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:44",
+              "offset": 0,
+              "slot": "3"
+            }
+          ],
+          "erc7201:openzeppelin.storage.ReentrancyGuard": [
+            {
+              "contract": "ReentrancyGuardUpgradeable",
+              "label": "_status",
+              "type": "t_uint256",
+              "src": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol:43",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.AccessControl": [
+            {
+              "contract": "AccessControlUpgradeable",
+              "label": "_roles",
+              "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+              "src": "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol:61",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    },
+    "d1ccdeaa2a2366270d342edbe43a9943198d92bf87a4542ee1ea01e7fb85ce3e": {
+      "address": "0xB540D775930eBEf8FFe95C4a0a84AAed70D9bEa2",
+      "txHash": "0x437e7f88a8e716d5bfd25fdaf45853b7de28c408827dc861a00cb1e8097ec080",
+      "layout": {
+        "solcVersion": "0.8.22",
+        "storage": [
+          {
+            "label": "tradeCounter",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:48"
+          },
+          {
+            "label": "tokenIdCounter",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:48"
+          },
+          {
+            "label": "vault",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_contract(EscrowVault)9437",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:58"
+          },
+          {
+            "label": "buyerCollateralRatio",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:68"
+          },
+          {
+            "label": "sellerCollateralRatio",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:69"
+          },
+          {
+            "label": "sellerRewardBps",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:70"
+          },
+          {
+            "label": "latePenaltyBps",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:71"
+          },
+          {
+            "label": "tokens",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_mapping(t_bytes32,t_struct(TokenInfo)9536_storage)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:86"
+          },
+          {
+            "label": "symbolToTokenId",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_mapping(t_string_memory_ptr,t_bytes32)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:86"
+          },
+          {
+            "label": "trades",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_mapping(t_uint256,t_struct(MatchedTrade)9583_storage)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:138"
+          },
+          {
+            "label": "usedOrderHashes",
+            "offset": 0,
+            "slot": "10",
+            "type": "t_mapping(t_bytes32,t_bool)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:140"
+          },
+          {
+            "label": "orderFilled",
+            "offset": 0,
+            "slot": "11",
+            "type": "t_mapping(t_bytes32,t_uint256)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:148"
+          },
+          {
+            "label": "minimumFillAmount",
+            "offset": 0,
+            "slot": "12",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:153"
+          },
+          {
+            "label": "userLockedCollateral",
+            "offset": 0,
+            "slot": "13",
+            "type": "t_mapping(t_address,t_mapping(t_address,t_uint256))",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:158"
+          },
+          {
+            "label": "totalLockedCollateral",
+            "offset": 0,
+            "slot": "14",
+            "type": "t_mapping(t_address,t_uint256)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:165"
+          },
+          {
+            "label": "__gap",
+            "offset": 0,
+            "slot": "15",
+            "type": "t_array(t_uint256)49_storage",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:1060"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_struct(RoleData)24_storage)": {
+            "label": "mapping(bytes32 => struct AccessControlUpgradeable.RoleData)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(AccessControlStorage)34_storage": {
+            "label": "struct AccessControlUpgradeable.AccessControlStorage",
+            "members": [
+              {
+                "label": "_roles",
+                "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(EIP712Storage)423_storage": {
+            "label": "struct EIP712Upgradeable.EIP712Storage",
+            "members": [
+              {
+                "label": "_hashedName",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_hashedVersion",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "_name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "_version",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              }
+            ],
+            "numberOfBytes": "128"
+          },
+          "t_struct(InitializableStorage)145_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)296_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(ReentrancyGuardStorage)360_storage": {
+            "label": "struct ReentrancyGuardUpgradeable.ReentrancyGuardStorage",
+            "members": [
+              {
+                "label": "_status",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(RoleData)24_storage": {
+            "label": "struct AccessControlUpgradeable.RoleData",
+            "members": [
+              {
+                "label": "hasRole",
+                "type": "t_mapping(t_address,t_bool)",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "adminRole",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              }
+            ],
+            "numberOfBytes": "64"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_array(t_uint256)49_storage": {
+            "label": "uint256[49]",
+            "numberOfBytes": "1568"
+          },
+          "t_contract(EscrowVault)9437": {
+            "label": "contract EscrowVault",
+            "numberOfBytes": "20"
+          },
+          "t_mapping(t_address,t_mapping(t_address,t_uint256))": {
+            "label": "mapping(address => mapping(address => uint256))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_uint256)": {
+            "label": "mapping(address => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_bool)": {
+            "label": "mapping(bytes32 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_struct(TokenInfo)9536_storage)": {
+            "label": "mapping(bytes32 => struct PreMarketTrade.TokenInfo)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_uint256)": {
+            "label": "mapping(bytes32 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_string_memory_ptr,t_bytes32)": {
+            "label": "mapping(string => bytes32)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(MatchedTrade)9583_storage)": {
+            "label": "mapping(uint256 => struct PreMarketTrade.MatchedTrade)",
+            "numberOfBytes": "32"
+          },
+          "t_string_memory_ptr": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(MatchedTrade)9583_storage": {
+            "label": "struct PreMarketTrade.MatchedTrade",
+            "members": [
+              {
+                "label": "buyer",
+                "type": "t_struct(PreOrder)9563_storage",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "seller",
+                "type": "t_struct(PreOrder)9563_storage",
+                "offset": 0,
+                "slot": "8"
+              },
+              {
+                "label": "targetToken",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "16"
+              },
+              {
+                "label": "matchTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "17"
+              },
+              {
+                "label": "settled",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "18"
+              },
+              {
+                "label": "filledAmount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "19"
+              },
+              {
+                "label": "buyerCollateral",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "20"
+              },
+              {
+                "label": "sellerCollateral",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "21"
+              }
+            ],
+            "numberOfBytes": "704"
+          },
+          "t_struct(PreOrder)9563_storage": {
+            "label": "struct PreMarketTrade.PreOrder",
+            "members": [
+              {
+                "label": "trader",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "collateralToken",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "targetTokenId",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "amount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "price",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "isBuy",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "nonce",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "deadline",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "7"
+              }
+            ],
+            "numberOfBytes": "256"
+          },
+          "t_struct(TokenInfo)9536_storage": {
+            "label": "struct PreMarketTrade.TokenInfo",
+            "members": [
+              {
+                "label": "tokenId",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "symbol",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "realAddress",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "mappingTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "settleTimeLimit",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "exists",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "7"
+              }
+            ],
+            "numberOfBytes": "256"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.EIP712": [
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedName",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:39",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_hashedVersion",
+              "type": "t_bytes32",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:41",
+              "offset": 0,
+              "slot": "1"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_name",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:43",
+              "offset": 0,
+              "slot": "2"
+            },
+            {
+              "contract": "EIP712Upgradeable",
+              "label": "_version",
+              "type": "t_string_storage",
+              "src": "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol:44",
+              "offset": 0,
+              "slot": "3"
+            }
+          ],
+          "erc7201:openzeppelin.storage.ReentrancyGuard": [
+            {
+              "contract": "ReentrancyGuardUpgradeable",
+              "label": "_status",
+              "type": "t_uint256",
+              "src": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol:43",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.AccessControl": [
+            {
+              "contract": "AccessControlUpgradeable",
+              "label": "_roles",
+              "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+              "src": "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol:61",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    },
+    "244f1426a4a5cd711b6f6562525b3382899863903c2f8b81dae9757c0f4c35d5": {
+      "address": "0xa8982ED876c66221e4DAC590250c1aC3267f8d76",
+      "txHash": "0x63f4941b0bea5fab40971050bca1d4d3efff307925f228c3c92dbccbd63e0af8",
+      "layout": {
+        "solcVersion": "0.8.22",
+        "storage": [
+          {
+            "label": "tradeCounter",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:48"
+          },
+          {
+            "label": "tokenIdCounter",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:48"
+          },
+          {
+            "label": "vault",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_contract(EscrowVault)9437",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:58"
+          },
+          {
+            "label": "buyerCollateralRatio",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:70"
+          },
+          {
+            "label": "sellerCollateralRatio",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:71"
+          },
+          {
+            "label": "sellerRewardBps",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:72"
+          },
+          {
+            "label": "latePenaltyBps",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:73"
+          },
+          {
+            "label": "tokens",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_mapping(t_bytes32,t_struct(TokenInfo)9544_storage)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:88"
+          },
+          {
+            "label": "symbolToTokenId",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_mapping(t_string_memory_ptr,t_bytes32)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:88"
+          },
+          {
+            "label": "trades",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_mapping(t_uint256,t_struct(MatchedTrade)9591_storage)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:140"
+          },
+          {
+            "label": "usedOrderHashes",
+            "offset": 0,
+            "slot": "10",
+            "type": "t_mapping(t_bytes32,t_bool)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:142"
+          },
+          {
+            "label": "orderFilled",
+            "offset": 0,
+            "slot": "11",
+            "type": "t_mapping(t_bytes32,t_uint256)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:150"
+          },
+          {
+            "label": "minimumFillAmount",
+            "offset": 0,
+            "slot": "12",
+            "type": "t_uint256",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:155"
+          },
+          {
+            "label": "userLockedCollateral",
+            "offset": 0,
+            "slot": "13",
+            "type": "t_mapping(t_address,t_mapping(t_address,t_uint256))",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:160"
+          },
+          {
+            "label": "totalLockedCollateral",
+            "offset": 0,
+            "slot": "14",
+            "type": "t_mapping(t_address,t_uint256)",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:168"
+          },
+          {
+            "label": "__gap",
+            "offset": 0,
+            "slot": "15",
+            "type": "t_array(t_uint256)49_storage",
+            "contract": "PreMarketTrade",
+            "src": "contracts/PreMarketTrade.sol:1134"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_struct(RoleData)24_storage)": {
+            "label": "mapping(bytes32 => struct AccessControlUpgradeable.RoleData)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(AccessControlStorage)34_storage": {
+            "label": "struct AccessControlUpgradeable.AccessControlStorage",
+            "members": [
+              {
+                "label": "_roles",
+                "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(EIP712Storage)423_storage": {
+            "label": "struct EIP712Upgradeable.EIP712Storage",
+            "members": [
+              {
+                "label": "_hashedName",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_hashedVersion",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "_name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "_version",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              }
+            ],
+            "numberOfBytes": "128"
+          },
+          "t_struct(InitializableStorage)145_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)296_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(ReentrancyGuardStorage)360_storage": {
+            "label": "struct ReentrancyGuardUpgradeable.ReentrancyGuardStorage",
+            "members": [
+              {
+                "label": "_status",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(RoleData)24_storage": {
+            "label": "struct AccessControlUpgradeable.RoleData",
+            "members": [
+              {
+                "label": "hasRole",
+                "type": "t_mapping(t_address,t_bool)",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "adminRole",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              }
+            ],
+            "numberOfBytes": "64"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_array(t_uint256)49_storage": {
+            "label": "uint256[49]",
+            "numberOfBytes": "1568"
+          },
+          "t_contract(EscrowVault)9437": {
+            "label": "contract EscrowVault",
+            "numberOfBytes": "20"
+          },
+          "t_mapping(t_address,t_mapping(t_address,t_uint256))": {
+            "label": "mapping(address => mapping(address => uint256))",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_uint256)": {
+            "label": "mapping(address => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_bool)": {
+            "label": "mapping(bytes32 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_struct(TokenInfo)9544_storage)": {
+            "label": "mapping(bytes32 => struct PreMarketTrade.TokenInfo)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_uint256)": {
+            "label": "mapping(bytes32 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_string_memory_ptr,t_bytes32)": {
+            "label": "mapping(string => bytes32)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(MatchedTrade)9591_storage)": {
+            "label": "mapping(uint256 => struct PreMarketTrade.MatchedTrade)",
+            "numberOfBytes": "32"
+          },
+          "t_string_memory_ptr": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(MatchedTrade)9591_storage": {
+            "label": "struct PreMarketTrade.MatchedTrade",
+            "members": [
+              {
+                "label": "buyer",
+                "type": "t_struct(PreOrder)9571_storage",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "seller",
+                "type": "t_struct(PreOrder)9571_storage",
+                "offset": 0,
+                "slot": "8"
+              },
+              {
+                "label": "targetToken",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "16"
+              },
+              {
+                "label": "matchTime",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "17"
+              },
+              {
+                "label": "settled",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "18"
+              },
+              {
+                "label": "filledAmount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "19"
+              },
+              {
+                "label": "buyerCollateral",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "20"
+              },
+              {
+                "label": "sellerCollateral",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "21"
+              }
+            ],
+            "numberOfBytes": "704"
+          },
+          "t_struct(PreOrder)9571_storage": {
+            "label": "struct PreMarketTrade.PreOrder",
+            "members": [
+              {
+                "label": "trader",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "collateralToken",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "targetTokenId",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "amount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "price",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "isBuy",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "nonce",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "deadline",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "7"
+              }
+            ],
+            "numberOfBytes": "256"
+          },
+          "t_struct(TokenInfo)9544_storage": {
             "label": "struct PreMarketTrade.TokenInfo",
             "members": [
               {

@@ -10,7 +10,7 @@ async function main() {
     // Địa chỉ contracts từ deployment output
     const contracts = {
         escrowVault: "0x6B4792a57caBEbE6363ce3C0354D1494e63d0320",
-        preMarketTradeProxy: "0x4E18BdA62EDb10000408a783f3e58ca2bADA8b5C",
+        preMarketTradeProxy: "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585",
         preMarketTradeImpl: "0xE1c604dC0b73A750b6D476CA7592aE26336A402f",
         admin: "0x6c4363Bc7d0888Ec19F71f845A73f41e37d2ab3a"
     };

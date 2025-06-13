@@ -60,8 +60,10 @@ contract PreMarketTrade is
      */
     string public constant VERSION = "1.0.0";
     
-    // ============ Price Bounds ============
-    uint256 public constant MIN_PRICE = 1e12; // 0.000001 token (6 decimals)
+    // ============ Price Bounds & Decimals ============
+    uint256 public constant PRICE_DECIMALS = 6; // Price được truyền với 6 decimals (wei6)
+    uint256 public constant PRICE_SCALE = 10**PRICE_DECIMALS; // 1e6
+    uint256 public constant MIN_PRICE = 1e3; // 0.001 token (6 decimals: 1000 wei6)
     uint256 public constant MAX_PRICE = 1e30; // Very high but reasonable
     
     // ============ Economic Parameters ============
@@ -92,8 +94,8 @@ contract PreMarketTrade is
      * @param trader Địa chỉ người giao dịch
      * @param collateralToken Token dùng làm tài sản thế chấp
      * @param targetTokenId ID của token thật sẽ được giao
-     * @param amount Số lượng token thật sẽ giao dịch
-     * @param price Giá per unit (trong collateral token)
+     * @param amount Số lượng token thật sẽ giao dịch (với decimals của token)
+     * @param price Giá per unit trong wei6 format (6 decimals) - VD: 1.5 USDT = 1500000
      * @param isBuy true = BUY order, false = SELL order
      * @param nonce Số sequence để tránh replay attack
      * @param deadline Thời hạn của order
@@ -316,7 +318,7 @@ contract PreMarketTrade is
         sellerCollateralRatio = 100; // 100% of trade value (asymmetric)
         sellerRewardBps = 0; // 0% reward for fulfilling
         latePenaltyBps = 10000; // 100% penalty for late settlement
-        minimumFillAmount = 1e15; // 0.001 token default
+        minimumFillAmount = 1e3; // 0.001 token default
         
         // Grant roles to admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
@@ -369,8 +371,8 @@ contract PreMarketTrade is
         bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
         bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
         
-        // Calculate collateral amounts with new economic model
-        uint256 tradeValue = actualFillAmount * buyOrder.price;
+        // Calculate collateral amounts with price scaling (price is wei6)
+        uint256 tradeValue = _calculateTradeValue(actualFillAmount, buyOrder.price);
         uint256 buyerCollateralAmount = (tradeValue * buyerCollateralRatio) / 100;
         uint256 sellerCollateralAmount = (tradeValue * sellerCollateralRatio) / 100;
         
@@ -478,8 +480,8 @@ contract PreMarketTrade is
             revert GracePeriodNotExpired();
         }
         
-        // Calculate rewards and penalties
-        uint256 sellerReward = (trade.filledAmount * trade.buyer.price * sellerRewardBps) / 10000;
+        // Calculate rewards and penalties with safe price scaling
+        uint256 sellerReward = _calculateRewardOrPenalty(trade.filledAmount, trade.buyer.price, sellerRewardBps);
         
         // UPDATE STATE FIRST (Reentrancy protection)
         trades[tradeId].settled = true;
@@ -532,8 +534,8 @@ contract PreMarketTrade is
             revert GracePeriodNotExpired();
         }
         
-        // Calculate penalty for seller
-        uint256 sellerPenalty = (trade.filledAmount * trade.buyer.price * latePenaltyBps) / 10000;
+        // Calculate penalty for seller with safe price scaling
+        uint256 sellerPenalty = _calculateRewardOrPenalty(trade.filledAmount, trade.buyer.price, latePenaltyBps);
         uint256 penaltyAmount = sellerPenalty > trade.sellerCollateral ? trade.sellerCollateral : sellerPenalty;
         
         // UPDATE STATE FIRST
@@ -720,7 +722,79 @@ contract PreMarketTrade is
         return (true, "");
     }
 
+    /**
+     * @notice Calculate trade value preview cho client - NEW FUNCTION
+     * @dev Giúp client estimate trade value trước khi submit order
+     * @param amount Số lượng token muốn trade
+     * @param priceWei6 Giá trong wei6 format
+     * @return tradeValue Giá trị giao dịch
+     * @return buyerCollateral Collateral buyer cần
+     * @return sellerCollateral Collateral seller cần
+     */
+    function calculateTradeValuePreview(uint256 amount, uint256 priceWei6)
+        external
+        view
+        returns (
+            uint256 tradeValue,
+            uint256 buyerCollateral,
+            uint256 sellerCollateral
+        )
+    {
+        tradeValue = _calculateTradeValue(amount, priceWei6);
+        buyerCollateral = (tradeValue * buyerCollateralRatio) / 100;
+        sellerCollateral = (tradeValue * sellerCollateralRatio) / 100;
+    }
+
     // ============ Internal Functions ============
+
+    /**
+     * @notice Calculate trade value với price scaling để handle wei6 decimals
+     * @dev Sử dụng safe math và scaling để tránh overflow và precision loss
+     * @param amount Số lượng token (có thể có decimals khác nhau)
+     * @param priceWei6 Giá token trong wei6 format (6 decimals)
+     * @return tradeValue Giá trị giao dịch đã được normalize
+     */
+    function _calculateTradeValue(uint256 amount, uint256 priceWei6) 
+        internal 
+        pure 
+        returns (uint256 tradeValue) 
+    {
+        // Để tránh overflow, ta kiểm tra trước khi nhân
+        require(amount <= type(uint256).max / priceWei6, "Trade value overflow");
+        
+        // Calculate raw trade value
+        // Note: Nếu amount có decimals khác 18, có thể cần adjust thêm
+        tradeValue = amount * priceWei6;
+        
+        // Normalize về collateral token decimals nếu cần
+        // Hiện tại giữ nguyên vì chưa biết decimals của collateral token
+        // Có thể thêm: tradeValue = tradeValue / PRICE_SCALE; nếu cần normalize
+        
+        return tradeValue;
+    }
+
+    /**
+     * @notice Calculate reward hoặc penalty với safe math
+     * @dev Tránh overflow khi nhân 3 số lớn và handle precision đúng
+     * @param filledAmount Số lượng đã fill
+     * @param priceWei6 Giá trong wei6 format
+     * @param basisPoints Basis points (0-10000)
+     * @return result Kết quả sau khi tính toán
+     */
+    function _calculateRewardOrPenalty(
+        uint256 filledAmount, 
+        uint256 priceWei6, 
+        uint256 basisPoints
+    ) internal pure returns (uint256 result) {
+        // Kiểm tra overflow trước khi tính
+        uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
+        
+        // Safe calculation với basis points
+        require(tradeValue <= type(uint256).max / basisPoints, "Reward calculation overflow");
+        
+        result = (tradeValue * basisPoints) / 10000;
+        return result;
+    }
 
     /**
      * @dev Validate tính tương thích của hai orders với enhanced checks

@@ -40,7 +40,7 @@ npx hardhat run scripts/verify-custom.ts --network base-sepolia
 # Option 2: Nhập địa chỉ custom từ command line
 npx hardhat run scripts/verify-custom.ts --network base-sepolia -- \
   0x6B4792a57caBEbE6363ce3C0354D1494e63d0320 \
-  0x4E18BdA62EDb10000408a783f3e58ca2bADA8b5C \
+  0x9D90aeb5c841925fc8D7c5481c02523bDAc95585 \
   0xE1c604dC0b73A750b6D476CA7592aE26336A402f \
   0x6c4363Bc7d0888Ec19F71f845A73f41e37d2ab3a
 
@@ -74,7 +74,7 @@ npx hardhat run scripts/verify-custom.ts --network base-sepolia -- deployment.js
     ✅ PreMarketTrade Implementation verified successfully!
 
 📋 [3/3] Verifying Proxy Contract...
-    Address: 0x4E18BdA62EDb10000408a783f3e58ca2bADA8b5C
+    Address: 0x9D90aeb5c841925fc8D7c5481c02523bDAc95585
     ✅ Proxy Contract already verified!
 
 🎉 Verification Summary:
@@ -122,7 +122,7 @@ Tạo file `deployment.json` với format:
 ```json
 {
   "vault": "0x6B4792a57caBEbE6363ce3C0354D1494e63d0320",
-  "proxy": "0x4E18BdA62EDb10000408a783f3e58ca2bADA8b5C", 
+  "proxy": "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585", 
   "implementation": "0xE1c604dC0b73A750b6D476CA7592aE26336A402f",
   "admin": "0x6c4363Bc7d0888Ec19F71f845A73f41e37d2ab3a",
   "network": "base-sepolia",
