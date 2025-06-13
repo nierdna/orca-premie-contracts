@@ -44,9 +44,9 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
     
     // ============ Economic Parameters ============
     uint256 public buyerCollateralRatio = 100; // 100% of trade value
-    uint256 public sellerCollateralRatio = 20;  // 20% of trade value (asymmetric)
-    uint256 public sellerRewardBps = 50;        // 0.5% reward for fulfilling
-    uint256 public latePenaltyBps = 100;        // 1% penalty for late settlement
+    uint256 public sellerCollateralRatio = 100;  // 100% of trade value (asymmetric)
+    uint256 public sellerRewardBps = 0;        // 0% reward for fulfilling
+    uint256 public latePenaltyBps = 10000;        // 100% penalty for late settlement
     
     // ============ Token Market ============
     struct TokenInfo {
@@ -806,14 +806,14 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
     }
 
     /**
-     * @notice Update collateral ratios - NEW FUNCTION
+     * @notice Update collateral ratios - FIXED VALIDATION BOUNDS
      */
     function updateCollateralRatios(
         uint256 newBuyerRatio,
         uint256 newSellerRatio
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newBuyerRatio == 0 || newBuyerRatio > 200) revert InvalidCollateralRatio(); // Max 200%
-        if (newSellerRatio == 0 || newSellerRatio > 100) revert InvalidCollateralRatio(); // Max 100%
+        if (newSellerRatio == 0 || newSellerRatio > 200) revert InvalidCollateralRatio(); // Max 200% - FIXED
         
         emit CollateralRatioUpdated(buyerCollateralRatio, newBuyerRatio, sellerCollateralRatio, newSellerRatio);
         
@@ -822,14 +822,14 @@ contract PreMarketTrade is AccessControl, ReentrancyGuard, EIP712, Pausable {
     }
 
     /**
-     * @notice Update economic parameters - NEW FUNCTION
+     * @notice Update economic parameters - FIXED VALIDATION BOUNDS
      */
     function updateEconomicParameters(
         uint256 newSellerRewardBps,
         uint256 newLatePenaltyBps
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newSellerRewardBps > 1000) revert InvalidRewardParameters(); // Max 10%
-        if (newLatePenaltyBps > 2000) revert InvalidRewardParameters(); // Max 20%
+        if (newLatePenaltyBps > 10000) revert InvalidRewardParameters(); // Max 100% - FIXED
         
         sellerRewardBps = newSellerRewardBps;
         latePenaltyBps = newLatePenaltyBps;
