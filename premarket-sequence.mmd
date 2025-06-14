@@ -1,0 +1,71 @@
+sequenceDiagram
+    participant A as Admin
+    participant U as User/Buyer
+    participant S as User/Seller  
+    participant BE as Backend
+    participant R as Relayer
+    participant SC as Smart Contract
+    participant V as Vault Contract
+    participant T as Token Contract
+
+    Note over A,T: 1. Admin tạo Token Market
+    A->>SC: createTokenMarket(tokenInfo)
+    SC-->>A: Market Created ✅
+
+    Note over U,T: 2. User Deposit Flow
+    U->>T: allowance(user, vault)
+    T-->>U: current allowance
+    alt Allowance insufficient
+        U->>T: approve(vault, amount)
+        T-->>U: Approval Set ✅
+    end
+    U->>V: deposit(amount)
+    V->>T: transferFrom(user, vault, amount)
+    T-->>V: Transfer Success
+    V-->>U: Deposit Success ✅
+
+    Note over U,S: 3. Order Creation with Signatures
+    U->>U: createBuyOrder(price, amount)
+    U->>U: signOrder(buyOrderHash)
+    U->>BE: submitOrder(buyOrder, signature)
+    BE-->>U: Order Stored ✅
+    
+    S->>S: createSellOrder(price, amount)  
+    S->>S: signOrder(sellOrderHash)
+    S->>BE: submitOrder(sellOrder, signature)
+    BE-->>S: Order Stored ✅
+
+    Note over R,SC: 4. Order Matching Process
+    R->>BE: queryMatchingOrders()
+    BE-->>R: [buyOrder, sellOrder, signatures]
+    R->>SC: executeMatch(buyOrder, sellOrder, signatures)
+    SC->>SC: validateSignatures(orders, signatures)
+    alt Signatures Valid
+        SC->>V: transferFunds(buyer, seller, amount)
+        V-->>SC: Transfer Success
+        SC-->>R: Orders Matched ✅
+        R->>BE: updateOrderStatus(matched)
+    else Invalid Signatures
+        SC-->>R: Match Failed ❌
+    end
+
+    Note over A,SC: 5. Admin Map Real Token
+    A->>SC: mapToken(marketId, realTokenAddress)
+    SC-->>A: Token Mapped ✅
+
+    Note over S,SC: 6. Seller Settlement
+    S->>SC: settleOrder(orderId, realTokens)
+    SC->>SC: validateTokenMapping()
+    SC->>V: releasePayment(seller, amount)
+    SC->>T: transferRealTokens(buyer, tokens)
+    V-->>S: Payment Released ✅
+    T-->>U: Real Tokens Received ✅
+    SC-->>S: Settlement Complete ✅
+
+    Note over U,V: 7. Buyer Cancel (Alternative Flow)
+    alt Order not matched yet
+        U->>SC: cancelOrder(orderId)
+        SC->>V: refund(buyer, amount)
+        V-->>U: Refund Complete ✅
+        SC-->>U: Order Cancelled ✅
+    end 
