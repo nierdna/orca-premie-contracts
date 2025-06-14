@@ -79,6 +79,7 @@ async function decodeError() {
         console.log(`\n❌ Error selector ${errorData.slice(0, 10)} not found in common errors`);
 
         // Manual check for specific selector
+        // 0xe2517d3f0000000000000000000000009d90aeb5c841925fc8d7c5481c02523bdac95585facaf2747a7486cf5730e9265973fb54447d3ace6e7e4711f6360826b0731941
         const selector = errorData.slice(0, 10);
         if (selector === "0xe2517d3f") {
             console.log("\n🔍 Manual decode attempt for selector 0xe2517d3f");

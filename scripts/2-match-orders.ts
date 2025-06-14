@@ -278,7 +278,7 @@ async function main() {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
 
     // Example token ID (thay bằng token ID thực từ script 1)
-    const targetTokenId = "0x37edc2e7d24a169c2483f308888b227dee88b65f32c23102e672ac8db0ddec75";
+    const targetTokenId = process.env.TOKEN_ID!;
 
     // Example USDC address (thay bằng address thực)
     const usdcAddress = process.env.USDC_ADDRESS || "0xA0b86a33E6426c8bf8fB4b6E2b78BB9db20CEaE3";

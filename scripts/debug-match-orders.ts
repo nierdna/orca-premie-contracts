@@ -41,7 +41,7 @@ async function debugMatchOrders() {
 
         // Check 2: Token exists
         console.log("\n=== CHECK 2: TOKEN EXISTS ===");
-        const targetTokenId = "0x37edc2e7d24a169c2483f308888b227dee88b65f32c23102e672ac8db0ddec75";
+        const targetTokenId = process.env.TOKEN_ID!;
         const tokenInfo = await preMarketTrade.tokens(targetTokenId);
         console.log(`Token exists: ${tokenInfo.exists}`);
         console.log(`Token symbol: ${tokenInfo.symbol}`);

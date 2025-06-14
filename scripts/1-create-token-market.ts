@@ -41,7 +41,7 @@ async function createTokenMarket(config: TokenMarketConfig) {
         }
 
         // Convert days to seconds
-        const settleTimeLimit = config.settleTimeLimitDays * 24 * 60 * 60;
+        const settleTimeLimit = Math.floor(config.settleTimeLimitDays * 24 * 60 * 60);
 
         console.log("📊 Token Market Configuration:");
         console.log(`  - Symbol: ${config.symbol}`);
@@ -143,15 +143,15 @@ async function createTokenMarket(config: TokenMarketConfig) {
 async function main() {
     // Example configurations
     const examples: TokenMarketConfig[] = [
-        {
-            symbol: "NEW-TOKEN",
-            name: "New Token Protocol",
-            settleTimeLimitDays: 30
-        },
+        // {
+        //     symbol: "NEW-TOKEN",
+        //     name: "New Token Protocol",
+        //     settleTimeLimitDays: 30
+        // },
         {
             symbol: "DEGEN-V2",
             name: "Degen Protocol V2",
-            settleTimeLimitDays: 7
+            settleTimeLimitDays: 1 / 24 / 60 / 2 // 30 seconds
         },
         {
             symbol: "AI-COIN",

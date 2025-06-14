@@ -11,6 +11,8 @@ interface SettleTradeConfig {
     targetTokenAddress: string; // Real token address to map
 }
 
+const DECIMALS = 6;
+
 /**
  * @notice Map token với real address trước khi settle
  */
@@ -64,7 +66,7 @@ async function settleTrade(config: SettleTradeConfig) {
     console.log("🚀 Starting trade settlement...");
 
     // Get signers
-    const [admin, seller] = await ethers.getSigners();
+    const [admin, , seller] = await ethers.getSigners();
     console.log("📝 Admin address:", admin.address);
     console.log("👤 Seller address:", seller.address);
 
@@ -91,8 +93,8 @@ async function settleTrade(config: SettleTradeConfig) {
         console.log(`  - Buyer: ${tradeInfo.buyer.trader}`);
         console.log(`  - Seller: ${tradeInfo.seller.trader}`);
         console.log(`  - Target Token ID: ${tradeInfo.buyer.targetTokenId}`);
-        console.log(`  - Amount: ${ethers.formatEther(tradeInfo.filledAmount)}`);
-        console.log(`  - Price: ${ethers.formatEther(tradeInfo.buyer.price)}`);
+        console.log(`  - Amount: ${ethers.formatUnits(tradeInfo.filledAmount, DECIMALS)}`);
+        console.log(`  - Price: ${ethers.formatUnits(tradeInfo.buyer.price, 6)}`);
         console.log(`  - Match Time: ${new Date(Number(tradeInfo.matchTime) * 1000).toISOString()}`);
         console.log(`  - Current Target Token: ${tradeInfo.targetToken}`);
         console.log(`  - Settled: ${tradeInfo.settled}`);
@@ -114,26 +116,45 @@ async function settleTrade(config: SettleTradeConfig) {
         }
 
         // Check if seller has enough tokens
-        const targetToken = await ethers.getContractAt("IERC20", mappedAddress);
+        const targetToken = await ethers.getContractAt("IERC20", mappedAddress) as any;
         const sellerBalance = await targetToken.balanceOf(tradeInfo.seller.trader);
         const requiredAmount = tradeInfo.filledAmount;
 
-        console.log(`💰 Seller Balance: ${ethers.formatEther(sellerBalance)}`);
-        console.log(`📊 Required Amount: ${ethers.formatEther(requiredAmount)}`);
+        console.log(`💰 Seller Balance: ${ethers.formatUnits(sellerBalance, DECIMALS)}`);
+        console.log(`📊 Required Amount: ${ethers.formatUnits(requiredAmount, DECIMALS)}`);
 
         if (sellerBalance < requiredAmount) {
-            throw new Error(`Seller không đủ token để settle. Cần: ${ethers.formatEther(requiredAmount)}, có: ${ethers.formatEther(sellerBalance)}`);
+            throw new Error(`Seller không đủ token để settle. Cần: ${ethers.formatUnits(requiredAmount, DECIMALS)}, có: ${ethers.formatUnits(sellerBalance, DECIMALS)}`);
         }
 
         // Check allowance
         const allowance = await targetToken.allowance(tradeInfo.seller.trader, CONTRACT_ADDRESS);
-        console.log(`🔓 Current Allowance: ${ethers.formatEther(allowance)}`);
+        console.log(`🔓 Current Allowance: ${ethers.formatUnits(allowance, DECIMALS)}`);
 
         if (allowance < requiredAmount) {
             console.log("🔓 Cần approve token trước khi settle...");
             console.log("ℹ️ Seller cần chạy: targetToken.approve(preMarketContract, amount)");
             // In real scenario, seller would do this separately
             // For demo purposes, we'll show the required approval
+            const approveTx = await targetToken.connect(seller).approve(
+                CONTRACT_ADDRESS,
+                ethers.MaxInt256,
+                {
+                    gasLimit: 100000 // Gas limit cho approve
+                }
+            );
+
+            console.log("📤 Approval transaction sent:", approveTx.hash);
+            console.log("⏳ Waiting for approval confirmation...");
+
+            const approveReceipt = await approveTx.wait();
+
+            if (approveReceipt && approveReceipt.status === 1) {
+                console.log("✅ Token approved successfully!");
+                console.log(`📋 Approval tx hash: ${approveTx.hash}`);
+            } else {
+                throw new Error("Token approval failed");
+            }
         }
 
         // Calculate timing
@@ -186,7 +207,7 @@ async function settleTrade(config: SettleTradeConfig) {
                     if (parsedLog && parsedLog.name === "TradeSettled") {
                         console.log(`🎯 Trade ID: ${parsedLog.args.tradeId}`);
                         console.log(`🪙 Target Token: ${parsedLog.args.targetToken}`);
-                        console.log(`💰 Seller Reward: ${ethers.formatEther(parsedLog.args.sellerReward)}`);
+                        console.log(`💰 Seller Reward: ${ethers.formatUnits(parsedLog.args.sellerReward, DECIMALS)}`);
                         console.log(`⏰ Is Late: ${parsedLog.args.isLate}`);
 
                         // Get updated trade info
@@ -258,7 +279,7 @@ async function main() {
     const examples: SettleTradeConfig[] = [
         {
             tradeId: "1",
-            targetTokenAddress: "0x1234567890123456789012345678901234567890" // Replace with real token address
+            targetTokenAddress: "0xd01ceeEa03fbadfA1B5aa5C1891a683c02f38C8f" // Replace with real token address
         },
         {
             tradeId: "2",

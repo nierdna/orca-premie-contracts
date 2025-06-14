@@ -787,10 +787,15 @@ contract PreMarketTrade is
         uint256 priceWei6, 
         uint256 basisPoints
     ) internal pure returns (uint256 result) {
+        // Nếu basisPoints = 0, không có reward/penalty
+        if (basisPoints == 0) {
+            return 0;
+        }
+        
         // Kiểm tra overflow trước khi tính
         uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
         
-        // Safe calculation với basis points
+        // Safe calculation với basis points - chỉ check khi basisPoints > 0
         require(tradeValue <= type(uint256).max / basisPoints, "Reward calculation overflow");
         
         result = (tradeValue * basisPoints) / 10000;
@@ -995,7 +1000,7 @@ contract PreMarketTrade is
         string calldata name,
         uint256 settleTimeLimit
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (bytes32 tokenId) {
-        require(settleTimeLimit >= 1 hours && settleTimeLimit <= 30 days, "Invalid settle time");
+        require(settleTimeLimit >= 15 seconds && settleTimeLimit <= 30 days, "Invalid settle time");
         require(bytes(symbol).length > 0 && bytes(name).length > 0, "Empty symbol or name");
         
         // Check for duplicate symbol

@@ -8,7 +8,7 @@ async function main() {
     console.log("🚀 Bắt đầu deploy MockERC20 và chuyển token từ deployer sang user1...");
 
     // Lấy danh sách accounts từ hardhat
-    const [deployer, user1,] = await ethers.getSigners();
+    const [deployer, , user1] = await ethers.getSigners();
 
     console.log("📋 Thông tin accounts:");
     console.log("Deployer address:", deployer.address);
@@ -26,7 +26,7 @@ async function main() {
         "function totalSupply() public view returns (uint256)",
         "function transferFrom(address from, address to, uint256 amount) public returns (bool)",
     ];
-    const mockToken = new ethers.Contract("0x2fEe5278e6552aA879137a95F550E7736541C303", abi, deployer) as any;
+    const mockToken = new ethers.Contract("0xd01ceeEa03fbadfA1B5aa5C1891a683c02f38C8f", abi, deployer) as any;
     const tokenAddress = await mockToken.getAddress();
     console.log("✅ MockERC20 deployed tại địa chỉ:", tokenAddress);
     const decimals = await mockToken.decimals();

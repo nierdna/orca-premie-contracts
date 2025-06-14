@@ -331,7 +331,7 @@ async function main() {
     // Example configurations for trade cancellation
     const tradeExamples: CancelTradeConfig[] = [
         {
-            tradeId: "1",
+            tradeId: "2",
             reason: "Seller failed to deliver tokens on time"
         },
         {
@@ -371,16 +371,16 @@ async function main() {
         console.log("⚠️ Trade cancellation demo failed (expected if no valid trades)");
     }
 
-    // Demo order cancellation
-    const selectedOrderConfig = orderExamples[0];
-    console.log("\n🎯 Cancelling order with configuration:");
-    console.log(JSON.stringify(selectedOrderConfig, null, 2));
+    // // Demo order cancellation
+    // const selectedOrderConfig = orderExamples[0];
+    // console.log("\n🎯 Cancelling order with configuration:");
+    // console.log(JSON.stringify(selectedOrderConfig, null, 2));
 
-    try {
-        await cancelOrder(selectedOrderConfig);
-    } catch (error) {
-        console.log("⚠️ Order cancellation demo failed (expected if no valid orders)");
-    }
+    // try {
+    //     await cancelOrder(selectedOrderConfig);
+    // } catch (error) {
+    //     console.log("⚠️ Order cancellation demo failed (expected if no valid orders)");
+    // }
 
     // Bulk operations (uncomment to use)
     // console.log("\n🎯 Bulk cancelling trades...");
