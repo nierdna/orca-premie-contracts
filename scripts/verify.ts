@@ -11,7 +11,7 @@ async function main() {
     const contracts = {
         escrowVault: "0x6B4792a57caBEbE6363ce3C0354D1494e63d0320",
         preMarketTradeProxy: "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585",
-        preMarketTradeImpl: "0x767b918f91ae2be34f89c967cbfa9183c1267a2d",
+        preMarketTradeImpl: "0x6EaFcEb9F200827448b0ac23d65C5c0a3788d19A",
         admin: "0x6c4363Bc7d0888Ec19F71f845A73f41e37d2ab3a"
     };
 
