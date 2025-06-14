@@ -3,7 +3,7 @@ import { ethers } from "hardhat";
 async function decodeError() {
     console.log("🔍 Decoding error selector...");
 
-    const errorData = "0xe2517d3f0000000000000000000000009d90aeb5c841925fc8d7c5481c02523bdac95585facaf2747a7486cf5730e9265973fb54447d3ace6e7e4711f6360826b0731941";
+    const errorData = "0xf4d678b8";
     const CONTRACT_ADDRESS = process.env.PREMARKET_CONTRACT || "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585";
 
     try {

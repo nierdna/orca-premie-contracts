@@ -18,3 +18,5 @@ cache
 .env
 
 .openzeppelin/
+
+base-sepolia.json

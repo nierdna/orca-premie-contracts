@@ -66,7 +66,7 @@ async function upgradeContract(proxyAddress: string) {
     return upgraded;
 }
 
-main()
+upgradeContract('0x9D90aeb5c841925fc8D7c5481c02523bDAc95585')
     .then(() => process.exit(0))
     .catch((error) => {
         console.error(error);

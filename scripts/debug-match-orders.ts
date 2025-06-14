@@ -15,7 +15,7 @@ async function debugMatchOrders() {
     console.log("👤 Seller address:", seller.address);
 
     // Contract address
-    const CONTRACT_ADDRESS = process.env.PREMARKET_CONTRACT || "0x9D90aeb5c841925fc8D7c5481c02523bDAc95585";
+    const CONTRACT_ADDRESS = process.env.PREMARKET_CONTRACT || "0x1bfaF47F4bc70772121d3ee8724Cad36557C7a79";
     const USDC_ADDRESS = process.env.USDC_ADDRESS || "0x2fEe5278e6552aA879137a95F550E7736541C303";
 
     console.log("🏗️ Contract address:", CONTRACT_ADDRESS);
@@ -23,7 +23,7 @@ async function debugMatchOrders() {
 
     try {
         // Get contract instance
-        const preMarketTrade = await ethers.getContractAt("PreMarketTrade", CONTRACT_ADDRESS);
+        const preMarketTrade: any = await ethers.getContractAt("PreMarketTrade", CONTRACT_ADDRESS);
         const usdc = await ethers.getContractAt("IERC20", USDC_ADDRESS);
 
         // Check 1: Relayer role
@@ -64,6 +64,26 @@ async function debugMatchOrders() {
         }
 
         const vault = await ethers.getContractAt("EscrowVault", vaultAddress);
+
+        // Check 3.1: PreMarket có TRADE_ROLE trong vault không
+        console.log("\n=== CHECK 3.1: PREMARKET TRADE_ROLE IN VAULT ===");
+        try {
+            const TRADE_ROLE = await vault.TRADER_ROLE();
+            const preMarketHasTradeRole = await vault.hasRole(TRADE_ROLE, CONTRACT_ADDRESS);
+            console.log(`TRADE_ROLE hash: ${TRADE_ROLE}`);
+            console.log(`PreMarket contract address: ${CONTRACT_ADDRESS}`);
+            console.log(`PreMarket has TRADE_ROLE in vault: ${preMarketHasTradeRole}`);
+
+            if (!preMarketHasTradeRole) {
+                console.log("❌ PROBLEM: PreMarket contract không có TRADE_ROLE trong vault!");
+                console.log("💡 Solution: Grant TRADE_ROLE cho PreMarket contract trong vault");
+                console.log(`💡 Command: vault.grantRole(TRADE_ROLE, "${CONTRACT_ADDRESS}")`);
+                return;
+            }
+        } catch (roleError: any) {
+            console.log("❌ Error checking TRADE_ROLE:", roleError.message);
+            console.log("💡 Vault có thể không có TRADE_ROLE hoặc access control");
+        }
 
         // Check 4: User balances in vault
         console.log("\n=== CHECK 4: USER BALANCES IN VAULT ===");

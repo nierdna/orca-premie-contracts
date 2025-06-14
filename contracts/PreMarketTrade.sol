@@ -769,6 +769,7 @@ contract PreMarketTrade is
         // Normalize về collateral token decimals nếu cần
         // Hiện tại giữ nguyên vì chưa biết decimals của collateral token
         // Có thể thêm: tradeValue = tradeValue / PRICE_SCALE; nếu cần normalize
+        tradeValue = tradeValue / PRICE_SCALE;
         
         return tradeValue;
     }
