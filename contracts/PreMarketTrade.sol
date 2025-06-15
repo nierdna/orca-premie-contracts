@@ -150,12 +150,7 @@ contract PreMarketTrade is
     uint256 public minimumFillAmount; // Will be set in initializer: 0.001 token default
     
     /**
-     * @notice Track locked collateral per user per token
-     */
-    mapping(address => mapping(address => uint256)) public userLockedCollateral;
-    
-    /**
-     * @notice Track total locked collateral per token
+     * @notice Track total locked collateral per token (keep for protocol monitoring)
      */
     mapping(address => uint256) public totalLockedCollateral;
 
@@ -388,9 +383,7 @@ contract PreMarketTrade is
             usedOrderHashes[sellOrderHash] = true;
         }
         
-        // Update collateral tracking
-        userLockedCollateral[buyOrder.trader][buyOrder.collateralToken] += buyerCollateralAmount;
-        userLockedCollateral[sellOrder.trader][sellOrder.collateralToken] += sellerCollateralAmount;
+        // Update total collateral tracking (keep for protocol monitoring)
         totalLockedCollateral[buyOrder.collateralToken] += buyerCollateralAmount + sellerCollateralAmount;
         
         // Create trade record
@@ -449,8 +442,6 @@ contract PreMarketTrade is
         }
     }
 
-
-
     /**
      * @notice Settle giao dịch bằng cách giao token thật - SIMPLIFIED VERSION
      * @dev Token phải được mapped trước bởi admin
@@ -487,9 +478,7 @@ contract PreMarketTrade is
         trades[tradeId].settled = true;
         trades[tradeId].targetToken = targetToken;
         
-        // Update collateral tracking
-        userLockedCollateral[trade.buyer.trader][trade.buyer.collateralToken] -= trade.buyerCollateral;
-        userLockedCollateral[trade.seller.trader][trade.buyer.collateralToken] -= trade.sellerCollateral;
+        // Update total collateral tracking
         totalLockedCollateral[trade.buyer.collateralToken] -= (trade.buyerCollateral + trade.sellerCollateral);
         
         // EXTERNAL CALLS LAST
@@ -509,8 +498,6 @@ contract PreMarketTrade is
         emit CollateralUnlocked(trade.seller.trader, trade.buyer.collateralToken, trade.sellerCollateral, tradeId);
         emit TradeSettled(tradeId, targetToken, sellerReward, isLate);
     }
-
-
 
     /**
      * @notice Hủy giao dịch sau grace period nếu seller không fulfill - IMPROVED
@@ -541,9 +528,7 @@ contract PreMarketTrade is
         // UPDATE STATE FIRST
         trades[tradeId].settled = true;
         
-        // Update collateral tracking
-        userLockedCollateral[trade.buyer.trader][trade.buyer.collateralToken] -= trade.buyerCollateral;
-        userLockedCollateral[trade.seller.trader][trade.buyer.collateralToken] -= trade.sellerCollateral;
+        // Update total collateral tracking
         totalLockedCollateral[trade.buyer.collateralToken] -= (trade.buyerCollateral + trade.sellerCollateral);
         
         // EXTERNAL CALLS LAST
@@ -654,17 +639,6 @@ contract PreMarketTrade is
     {
         bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
         return order.amount - orderFilled[orderHash];
-    }
-
-    /**
-     * @notice Get user's locked collateral amount - NEW VIEW FUNCTION
-     */
-    function getUserLockedCollateral(address user, address token) 
-        external 
-        view 
-        returns (uint256 locked) 
-    {
-        return userLockedCollateral[user][token];
     }
 
     /**
@@ -1130,11 +1104,10 @@ contract PreMarketTrade is
      * - trades: 1 slot
      * - usedOrderHashes: 1 slot
      * - orderFilled: 1 slot
-     * - userLockedCollateral: 1 slot
      * - totalLockedCollateral: 1 slot
      * 
-     * Total used: ~15 slots
-     * Reserved: 49 slots (đã trừ đi VERSION constant)
+     * Total used: ~14 slots (removed userLockedCollateral)
+     * Reserved: 50 slots (increased from 49)
      */
-    uint256[49] private __gap;
+    uint256[50] private __gap;
 } 
