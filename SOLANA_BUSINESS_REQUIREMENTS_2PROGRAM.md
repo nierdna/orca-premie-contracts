@@ -426,11 +426,6 @@ pub struct EconomicConfig {
 ```rust
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct TechnicalConfig {
-    pub max_orders_per_user: u16,       // Default: 100
-    pub max_fills_per_order: u16,       // Default: 1000
-    pub order_expiry_buffer: u32,       // Default: 300 seconds
-    pub signature_validity: u32,        // Default: 3600 seconds
-    pub max_slippage_bps: u16,          // Default: 500 (5%)
     pub min_settle_time: u32,           // Default: 3600 seconds (1 hour)
     pub max_settle_time: u32,           // Default: 2592000 seconds (30 days)
 }
@@ -1255,7 +1250,7 @@ export const ACCOUNT_SIZES = {
   VAULT_CONFIG_SIZE: 8 + 32 + 32 + 4 + (32 * 10) + 1 + 4 + 4 + (32 * 20) + 1,
   USER_BALANCE_SIZE: 8 + 32 + 32 + 8 + 1,
   VAULT_AUTHORITY_SIZE: 8 + 32 + 8 + 32 + 1,
-  TRADE_CONFIG_SIZE: 8 + 32 + 32 + 4 + (32 * 10) + (2 * 6) + (2 * 4) + (4 * 3) + 1 + 1,
+  TRADE_CONFIG_SIZE: 8 + 32 + 32 + 4 + (32 * 10) + (2 * 6) + (4 * 2) + 1 + 1,
   ORDER_STATUS_SIZE: 8 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1,
 };
 
@@ -1330,60 +1325,7 @@ pub fn create_token_market(
     Ok(())
 }
 
-// TradeRecord creation during MatchOrders with proper validation
-#[derive(Accounts)]
-#[instruction(buy_order: PreOrder, sell_order: PreOrder)]
-pub struct MatchOrders<'info> {
-    #[account(
-        init,
-        payer = relayer,
-        space = TRADE_RECORD_SIZE,
-    )]
-    pub trade_record: Account<'info, TradeRecord>,
-    
-    #[account(
-        constraint = token_market.owner == &crate::ID,
-        constraint = token_market.token_id == token_market.key(),
-        constraint = token_market.real_mint.is_some() @ TradingError::TokenNotMapped,
-    )]
-    pub token_market: Account<'info, TokenMarket>,
-    
-    #[account(
-        mut,
-        constraint = config.relayers.contains(&relayer.key()) @ TradingError::UnauthorizedRelayer,
-        constraint = !config.paused @ TradingError::TradingPaused,
-    )]
-    pub config: Account<'info, TradeConfig>,
-    
-    // Vault program accounts (for CPI)
-    /// CHECK: Validated in CPI call
-    #[account(constraint = vault_program.key() == config.vault_program)]
-    pub vault_program: AccountInfo<'info>,
-    
-    /// CHECK: Validated in CPI call
-    pub vault_config: AccountInfo<'info>,
-    
-    /// CHECK: Validated in CPI call
-    #[account(mut)]
-    pub buyer_balance: AccountInfo<'info>,
-    
-    /// CHECK: Validated in CPI call
-    #[account(mut)]
-    pub seller_balance: AccountInfo<'info>,
-    
-    /// CHECK: Validated in CPI call
-    pub vault_authority: AccountInfo<'info>,
-    
-    // System accounts
-    #[account(
-        mut,
-        constraint = config.relayers.contains(&relayer.key()) @ TradingError::UnauthorizedRelayer,
-    )]
-    pub relayer: Signer<'info>,
-    
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-}
+
 
 pub fn match_orders(
     ctx: Context<MatchOrders>,
@@ -1748,7 +1690,7 @@ pub const TRADE_CONFIG_SIZE: usize = 8 + // discriminator
     32 + // vault_program
     4 + (32 * 10) + // relayers (Vec<Pubkey>, max 10)
     (2 * 6) + // economic_config (6 u16 fields)
-    (2 * 4) + (4 * 3) + // technical_config (4 u16 + 3 u32 fields)
+    (4 * 2) + // technical_config (2 u32 fields)
     1 + // paused
     1; // bump
 
