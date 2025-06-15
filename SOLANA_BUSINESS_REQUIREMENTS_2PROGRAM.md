@@ -8,6 +8,48 @@
 
 ---
 
+## 🔧 **REQUIRED IMPORTS & DEPENDENCIES**
+
+```rust
+// Anchor framework
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer};
+use anchor_spl::associated_token::AssociatedToken;
+
+// Standard library
+use std::collections::HashMap;
+
+// Solana program library
+use solana_program::{
+    clock::Clock,
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    system_instruction,
+    sysvar::Sysvar,
+};
+
+// Cryptographic functions
+use ed25519_dalek::{Signature, PublicKey, Verifier};
+```
+
+## 🆔 **PROGRAM IDS & CONSTANTS**
+
+```rust
+// Program IDs (to be set during deployment)
+declare_id!("VaultProgramID111111111111111111111111111111");  // Vault Program
+// declare_id!("TradeProgramID111111111111111111111111111111");  // Trading Program
+
+// Cross-program references
+pub const VAULT_PROGRAM_ID: Pubkey = pubkey!("VaultProgramID111111111111111111111111111111");
+pub const TRADING_PROGRAM_ID: Pubkey = pubkey!("TradeProgramID111111111111111111111111111111");
+
+// Common token mints (examples)
+pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+pub const USDT_MINT: Pubkey = pubkey!("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
+```
+
+---
+
 ## 📖 **TABLE OF CONTENTS**
 
 1. [System Overview](#system-overview)
@@ -150,8 +192,9 @@ pub struct VaultAuthority {
 
 ### **B. Instructions**
 
-#### **Admin Instructions:**
+#### **Unified Instruction Enum:**
 ```rust
+#[derive(AnchorSerialize, AnchorDeserialize)]
 pub enum VaultInstruction {
     /// Initialize vault system
     InitializeVault {
@@ -179,12 +222,7 @@ pub enum VaultInstruction {
     
     /// Emergency unpause
     Unpause,
-}
-```
-
-#### **User Instructions:**
-```rust
-pub enum UserInstruction {
+    
     /// Deposit collateral tokens
     DepositCollateral {
         amount: u64,
@@ -194,38 +232,27 @@ pub enum UserInstruction {
     WithdrawCollateral {
         amount: u64,
     },
-}
-```
-
-#### **CPI-Only Instructions (Called by Trading Programs):**
-```rust
-pub enum CPIInstruction {
-    /// Subtract user balance (exact EVM slashBalance mapping)
+    
+    /// Subtract user balance (exact EVM slashBalance mapping) - CPI only
     SlashBalance {
-        user: Pubkey,
-        token_mint: Pubkey,
         amount: u64,
     },
     
-    /// Add user balance (exact EVM creditBalance mapping)
+    /// Add user balance (exact EVM creditBalance mapping) - CPI only
     CreditBalance {
-        user: Pubkey,
-        token_mint: Pubkey,
         amount: u64,
     },
     
-    /// Transfer tokens out of vault (exact EVM transferOut mapping)
+    /// Transfer tokens out of vault (exact EVM transferOut mapping) - CPI only
     TransferOut {
-        token_mint: Pubkey,
         recipient: Pubkey,
         amount: u64,
     },
     
-    /// Transfer between user balances (exact EVM transferBalance mapping)
+    /// Transfer between user balances (exact EVM transferBalance mapping) - CPI only
     TransferBalance {
         from_user: Pubkey,
         to_user: Pubkey,
-        token_mint: Pubkey,
         amount: u64,
     },
 }
@@ -263,6 +290,32 @@ pub fn validate_sufficient_balance(
 ) -> Result<()> {
     require!(user_balance.balance >= amount, VaultError::InsufficientBalance);
     Ok(())
+}
+```
+
+### **E. Error Definitions**
+
+```rust
+#[error_code]
+pub enum VaultError {
+    #[msg("Unauthorized trader program")]
+    UnauthorizedTrader,
+    #[msg("Insufficient balance")]
+    InsufficientBalance,
+    #[msg("Zero amount not allowed")]
+    ZeroAmount,
+    #[msg("Token transfer failed")]
+    TokenTransferFailed,
+    #[msg("Invalid token mint")]
+    InvalidTokenMint,
+    #[msg("Vault is paused")]
+    VaultPaused,
+    #[msg("Invalid admin")]
+    InvalidAdmin,
+    #[msg("Token not supported")]
+    TokenNotSupported,
+    #[msg("Math overflow")]
+    MathOverflow,
 }
 ```
 
@@ -369,11 +422,26 @@ pub struct EconomicConfig {
 }
 ```
 
+#### **Technical Config**
+```rust
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct TechnicalConfig {
+    pub max_orders_per_user: u16,       // Default: 100
+    pub max_fills_per_order: u16,       // Default: 1000
+    pub order_expiry_buffer: u32,       // Default: 300 seconds
+    pub signature_validity: u32,        // Default: 3600 seconds
+    pub max_slippage_bps: u16,          // Default: 500 (5%)
+    pub min_settle_time: u32,           // Default: 3600 seconds (1 hour)
+    pub max_settle_time: u32,           // Default: 2592000 seconds (30 days)
+}
+```
+
 ### **C. Instructions**
 
-#### **Admin Instructions:**
+#### **Unified Trading Instructions:**
 ```rust
-pub enum AdminInstruction {
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub enum TradingInstruction {
     /// Initialize trading system
     InitializeTrading {
         vault_program: Pubkey,
@@ -383,7 +451,6 @@ pub enum AdminInstruction {
     
     /// Create new token market
     CreateTokenMarket {
-        token_keypair: Pubkey,         // Client-generated keypair for TokenMarket
         symbol: String,
         name: String,
         settle_time_limit: u32,
@@ -391,7 +458,6 @@ pub enum AdminInstruction {
     
     /// Map real token to market
     MapToken {
-        token_id: Pubkey,              // TokenMarket account address as token ID
         real_mint: Pubkey,
     },
     
@@ -400,20 +466,19 @@ pub enum AdminInstruction {
         new_config: EconomicConfig,
     },
     
+    /// Update technical parameters
+    UpdateTechnicalConfig {
+        new_config: TechnicalConfig,
+    },
+    
     /// Add/remove relayers
     ManageRelayers {
         relayer: Pubkey,
         add: bool,
     },
-}
-```
-
-#### **Trading Instructions:**
-```rust
-pub enum TradingInstruction {
+    
     /// Match buy and sell orders
     MatchOrders {
-        trade_keypair: Pubkey,         // Client-generated keypair for TradeRecord
         buy_order: PreOrder,
         sell_order: PreOrder,
         buy_signature: [u8; 64],
@@ -422,35 +487,134 @@ pub enum TradingInstruction {
     },
     
     /// Settle completed trade
-    SettleTrade {
-        trade_id: Pubkey,              // TradeRecord account address as trade ID
-    },
+    SettleTrade,
     
     /// Cancel trade after grace period
-    CancelTrade {
-        trade_id: Pubkey,              // TradeRecord account address as trade ID
-    },
+    CancelTrade,
     
     /// Cancel order before matching
     CancelOrder {
         order: PreOrder,
         signature: [u8; 64],
     },
+    
+    /// Emergency pause
+    Pause,
+    
+    /// Emergency unpause
+    Unpause,
 }
 ```
 
-### **D. PDA Seeds (Updated)**
+### **D. PDA Seeds & Constants**
 
 ```rust
-// Trade config: ["trade_config"] - Still PDA
+// Trade config: ["trade_config"] - PDA
 pub const TRADE_CONFIG_SEED: &[u8] = b"trade_config";
 
-// Order status: ["order_status", order_hash] - Still PDA
+// Order status: ["order_status", order_hash] - PDA
 pub const ORDER_STATUS_SEED: &[u8] = b"order_status";
 
-// NOTE: TokenMarket and TradeRecord are now user-controlled keypairs, not PDAs
+// Price and validation constants
+pub const PRICE_SCALE: u64 = 1_000_000; // 6 decimals
+pub const MIN_PRICE: u64 = 1_000; // 0.001 (6 decimals)
+pub const MAX_PRICE: u64 = 1_000_000_000_000_000_000; // 1e18
+
+// Economic constants
+pub const MAX_COLLATERAL_RATIO: u16 = 20000; // 200%
+pub const MAX_REWARD_BPS: u16 = 1000; // 10%
+pub const MAX_PENALTY_BPS: u16 = 10000; // 100%
+
+// Technical limits
+pub const MAX_SYMBOL_LENGTH: usize = 10;
+pub const MAX_NAME_LENGTH: usize = 50;
+pub const MAX_AUTHORIZED_TRADERS: usize = 10;
+pub const MAX_SUPPORTED_TOKENS: usize = 20;
+pub const MAX_RELAYERS: usize = 10;
+
+// NOTE: TokenMarket and TradeRecord are user-controlled keypairs, not PDAs
 // - TokenMarket: Client generates keypair, address stored as token_id field
 // - TradeRecord: Client generates keypair, address stored as trade_id field
+```
+
+### **E. Error Definitions**
+
+```rust
+#[error_code]
+pub enum TradingError {
+    #[msg("Invalid signature")]
+    InvalidSignature,
+    #[msg("Orders incompatible")]
+    IncompatibleOrders,
+    #[msg("Trade already settled")]
+    TradeAlreadySettled,
+    #[msg("Grace period still active")]
+    GracePeriodActive,
+    #[msg("Grace period expired")]
+    GracePeriodExpired,
+    #[msg("Invalid account owner")]
+    InvalidAccountOwner,
+    #[msg("Vault CPI call failed")]
+    VaultCPIFailed,
+    #[msg("Math overflow")]
+    MathOverflow,
+    #[msg("Price too low")]
+    PriceTooLow,
+    #[msg("Price too high")]
+    PriceTooHigh,
+    #[msg("Order expired")]
+    OrderExpired,
+    #[msg("Order already used")]
+    OrderAlreadyUsed,
+    #[msg("Insufficient collateral")]
+    InsufficientCollateral,
+    #[msg("Trade not found")]
+    TradeNotFound,
+    #[msg("Only buyer can cancel")]
+    OnlyBuyerCanCancel,
+    #[msg("Only seller can settle")]
+    OnlySellerCanSettle,
+    #[msg("Token transfer failed")]
+    TokenTransferFailed,
+    #[msg("Invalid fill amount")]
+    InvalidFillAmount,
+    #[msg("Exceed order amount")]
+    ExceedOrderAmount,
+    #[msg("Below minimum fill")]
+    BelowMinimumFill,
+    #[msg("Token not exists")]
+    TokenNotExists,
+    #[msg("Token already mapped")]
+    TokenAlreadyMapped,
+    #[msg("Invalid token address")]
+    InvalidTokenAddress,
+    #[msg("Duplicate symbol")]
+    DuplicateSymbol,
+    #[msg("Invalid collateral ratio")]
+    InvalidCollateralRatio,
+    #[msg("Invalid reward parameters")]
+    InvalidRewardParameters,
+    #[msg("Zero amount")]
+    ZeroAmount,
+    #[msg("Self trade")]
+    SelfTrade,
+    #[msg("Trading paused")]
+    TradingPaused,
+    #[msg("Unauthorized relayer")]
+    UnauthorizedRelayer,
+    #[msg("Invalid settle time")]
+    InvalidSettleTime,
+    #[msg("Symbol too long")]
+    SymbolTooLong,
+    #[msg("Name too long")]
+    NameTooLong,
+    #[msg("Too many authorized traders")]
+    TooManyAuthorizedTraders,
+    #[msg("Too many supported tokens")]
+    TooManySupportedTokens,
+    #[msg("Too many relayers")]
+    TooManyRelayers,
+}
 ```
 
 ---
@@ -488,8 +652,6 @@ pub fn match_orders(ctx: Context<MatchOrders>, /* params */) -> Result<()> {
     
     vault_program::cpi::slash_balance(
         cpi_ctx,
-        buy_order.trader,
-        buy_order.collateral_token,
         buyer_collateral,
     )?;
     
@@ -507,8 +669,6 @@ pub fn match_orders(ctx: Context<MatchOrders>, /* params */) -> Result<()> {
     
     vault_program::cpi::slash_balance(
         cpi_ctx,
-        sell_order.trader,
-        sell_order.collateral_token,
         seller_collateral,
     )?;
     
@@ -561,21 +721,6 @@ pub struct MatchOrders<'info> {
 ### **C. Error Handling**
 
 ```rust
-// Trading program errors
-#[error_code]
-pub enum TradingError {
-    #[msg("Invalid signature")]
-    InvalidSignature,
-    #[msg("Orders incompatible")]
-    IncompatibleOrders,
-    #[msg("Trade already settled")]
-    TradeAlreadySettled,
-    #[msg("Grace period active")]
-    GracePeriodActive,
-    #[msg("Vault CPI failed")]
-    VaultCPIFailed,
-}
-
 // Handle CPI errors
 pub fn handle_vault_error(error: ProgramError) -> TradingError {
     match error {
@@ -610,19 +755,38 @@ Emit TokenMarketCreated event with token_id (EVM compatible)
 
 ### **2. 💰 COLLATERAL MANAGEMENT FLOW**
 
-```
-User → Escrow Vault Program → DepositCollateral {
-    token_mint: USDC_MINT,
-    amount: 1000_000000  // 1000 USDC
+```rust
+// User deposits collateral
+pub fn deposit_collateral(ctx: Context<DepositCollateral>, amount: u64) -> Result<()> {
+    // Transfer from user ATA to vault ATA
+    token::transfer(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            token::Transfer {
+                from: ctx.accounts.user_ata.to_account_info(),
+                to: ctx.accounts.vault_ata.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        ),
+        amount,
+    )?;
+    
+    // Update UserBalance account (balance += amount) // Exact EVM logic
+    ctx.accounts.user_balance.balance += amount;
+    
+    // Update VaultAuthority (total_deposits += amount) // Exact EVM logic
+    ctx.accounts.vault_authority.total_deposits += amount;
+    
+    // Emit CollateralDeposited event
+    emit!(CollateralDeposited {
+        user: ctx.accounts.user.key(),
+        token_mint: ctx.accounts.token_mint.key(),
+        amount,
+        new_balance: ctx.accounts.user_balance.balance,
+    });
+    
+    Ok(())
 }
-↓
-Transfer from user ATA to vault ATA
-↓
-Update UserBalance account (balance += amount) // Exact EVM logic
-↓
-Update VaultAuthority (total_deposits += amount) // Exact EVM logic
-↓
-Emit CollateralDeposited event
 ```
 
 ### **3. 🔀 ORDER MATCHING FLOW (Cross-Program)**
@@ -779,7 +943,7 @@ pub fn create_order_message(order: &PreOrder) -> Vec<u8> {
     message.extend_from_slice(b"PreMarketOrder");  // Domain separator
     message.extend_from_slice(&order.trader.to_bytes());
     message.extend_from_slice(&order.collateral_token.to_bytes());
-    message.extend_from_slice(&order.target_token_id);
+    message.extend_from_slice(&order.token_id.to_bytes()); // FIXED: was target_token_id
     message.extend_from_slice(&order.amount.to_le_bytes());
     message.extend_from_slice(&order.price.to_le_bytes());
     message.push(if order.is_buy { 1 } else { 0 });
@@ -820,10 +984,7 @@ pub fn validate_price_bounds(price: u64) -> Result<()> {
     Ok(())
 }
 
-// Constants
-pub const PRICE_SCALE: u64 = 1_000_000; // 6 decimals
-pub const MIN_PRICE: u64 = 1_000; // 0.001
-pub const MAX_PRICE: u64 = 1_000_000_000_000_000_000; // 1e18
+// Constants (defined above in PDA Seeds & Constants section)
 ```
 
 ---
@@ -1086,20 +1247,54 @@ export class AccountManager {
     };
   }
 }
+
+// Constants for TypeScript client
+export const ACCOUNT_SIZES = {
+  TOKEN_MARKET_SIZE: 8 + 32 + 4 + 10 + 4 + 50 + 1 + 32 + 1 + 8 + 4 + 8,
+  TRADE_RECORD_SIZE: 8 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 32,
+  VAULT_CONFIG_SIZE: 8 + 32 + 32 + 4 + (32 * 10) + 1 + 4 + 4 + (32 * 20) + 1,
+  USER_BALANCE_SIZE: 8 + 32 + 32 + 8 + 1,
+  VAULT_AUTHORITY_SIZE: 8 + 32 + 8 + 32 + 1,
+  TRADE_CONFIG_SIZE: 8 + 32 + 32 + 4 + (32 * 10) + (2 * 6) + (2 * 4) + (4 * 3) + 1 + 1,
+  ORDER_STATUS_SIZE: 8 + 32 + 32 + 8 + 8 + 2 + 8 + 1 + 1,
+};
+
+// Program IDs for TypeScript client
+export const PROGRAM_IDS = {
+  VAULT_PROGRAM_ID: new PublicKey("VaultProgramID111111111111111111111111111111"),
+  TRADING_PROGRAM_ID: new PublicKey("TradeProgramID111111111111111111111111111111"),
+};
+
+// Common token mints
+export const TOKEN_MINTS = {
+  USDC: new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+  USDT: new PublicKey("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"),
+};
 ```
 
-#### **Program-side Account Handling:**
+### **Program-side Account Handling:**
 
 ```rust
-// TokenMarket creation
+// TokenMarket creation with proper validation
 #[derive(Accounts)]
+#[instruction(symbol: String, name: String, settle_time_limit: u32)]
 pub struct CreateTokenMarket<'info> {
     #[account(
-        mut,
-        constraint = token_market.owner == &crate::ID,
-        constraint = token_market.data_len() == TokenMarket::LEN,
+        init,
+        payer = admin,
+        space = TOKEN_MARKET_SIZE,
+        constraint = symbol.len() <= MAX_SYMBOL_LENGTH @ TradingError::SymbolTooLong,
+        constraint = name.len() <= MAX_NAME_LENGTH @ TradingError::NameTooLong,
+        constraint = settle_time_limit >= 3600 @ TradingError::InvalidSettleTime,
+        constraint = settle_time_limit <= 2592000 @ TradingError::InvalidSettleTime,
     )]
     pub token_market: Account<'info, TokenMarket>,
+    
+    #[account(
+        mut,
+        constraint = config.admin == admin.key() @ TradingError::InvalidAdmin,
+    )]
+    pub config: Account<'info, TradeConfig>,
     
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -1124,34 +1319,88 @@ pub fn create_token_market(
     token_market.settle_time_limit = settle_time_limit;
     token_market.created_at = Clock::get()?.unix_timestamp;
     
+    emit!(TokenMarketCreated {
+        token_id: token_market.token_id,
+        symbol: token_market.symbol.clone(),
+        name: token_market.name.clone(),
+        settle_time_limit,
+        created_at: token_market.created_at,
+    });
+    
     Ok(())
 }
 
-// TradeRecord creation (during MatchOrders)
+// TradeRecord creation during MatchOrders with proper validation
 #[derive(Accounts)]
+#[instruction(buy_order: PreOrder, sell_order: PreOrder)]
 pub struct MatchOrders<'info> {
     #[account(
-        mut,
-        constraint = trade_record.owner == &crate::ID,
-        constraint = trade_record.data_len() == TradeRecord::LEN,
+        init,
+        payer = relayer,
+        space = TRADE_RECORD_SIZE,
     )]
-    pub trade_record: Account<'info, TradeRecord>,  // Created by client, initialized here
+    pub trade_record: Account<'info, TradeRecord>,
     
-    #[account(mut)]
-    pub token_market: Account<'info, TokenMarket>,  // Referenced by orders
+    #[account(
+        constraint = token_market.owner == &crate::ID,
+        constraint = token_market.token_id == token_market.key(),
+        constraint = token_market.real_mint.is_some() @ TradingError::TokenNotMapped,
+    )]
+    pub token_market: Account<'info, TokenMarket>,
     
+    #[account(
+        mut,
+        constraint = config.relayers.contains(&relayer.key()) @ TradingError::UnauthorizedRelayer,
+        constraint = !config.paused @ TradingError::TradingPaused,
+    )]
+    pub config: Account<'info, TradeConfig>,
+    
+    // Vault program accounts (for CPI)
+    /// CHECK: Validated in CPI call
+    #[account(constraint = vault_program.key() == config.vault_program)]
+    pub vault_program: AccountInfo<'info>,
+    
+    /// CHECK: Validated in CPI call
+    pub vault_config: AccountInfo<'info>,
+    
+    /// CHECK: Validated in CPI call
     #[account(mut)]
+    pub buyer_balance: AccountInfo<'info>,
+    
+    /// CHECK: Validated in CPI call
+    #[account(mut)]
+    pub seller_balance: AccountInfo<'info>,
+    
+    /// CHECK: Validated in CPI call
+    pub vault_authority: AccountInfo<'info>,
+    
+    // System accounts
+    #[account(
+        mut,
+        constraint = config.relayers.contains(&relayer.key()) @ TradingError::UnauthorizedRelayer,
+    )]
     pub relayer: Signer<'info>,
     
-    // ... vault CPI accounts
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn match_orders(
     ctx: Context<MatchOrders>,
     buy_order: PreOrder,
     sell_order: PreOrder,
-    // ... other params
+    buy_signature: [u8; 64],
+    sell_signature: [u8; 64],
+    fill_amount: Option<u64>,
 ) -> Result<()> {
+    // Validate orders and signatures
+    validate_orders(&buy_order, &sell_order)?;
+    verify_order_signature(&buy_order, &buy_signature)?;
+    verify_order_signature(&sell_order, &sell_signature)?;
+    
+    // Calculate fill amount
+    let actual_fill_amount = calculate_fill_amount(&buy_order, &sell_order, fill_amount)?;
+    
     // Initialize TradeRecord during matching
     let trade_record = &mut ctx.accounts.trade_record;
     
@@ -1161,153 +1410,125 @@ pub fn match_orders(
     trade_record.seller = sell_order.trader;
     trade_record.token_id = ctx.accounts.token_market.key();
     trade_record.collateral_mint = buy_order.collateral_token;
-    trade_record.filled_amount = fill_amount;
+    trade_record.filled_amount = actual_fill_amount;
     trade_record.price = buy_order.price;
     trade_record.match_time = Clock::get()?.unix_timestamp;
     trade_record.settled = false;
     
-    // ... rest of matching logic
+    // Calculate collateral requirements
+    let (buyer_collateral, seller_collateral) = calculate_collateral_requirements(
+        actual_fill_amount,
+        buy_order.price,
+        &ctx.accounts.config.economic_config,
+    )?;
+    
+    trade_record.buyer_collateral = buyer_collateral;
+    trade_record.seller_collateral = seller_collateral;
+    
+    // CPI calls to vault for collateral locking
+    perform_collateral_locking(&ctx, buyer_collateral, seller_collateral)?;
+    
+    // Emit events
+    emit!(OrdersMatched {
+        trade_id: trade_record.trade_id,
+        buyer: trade_record.buyer,
+        seller: trade_record.seller,
+        token_id: trade_record.token_id,
+        filled_amount: actual_fill_amount,
+        price: buy_order.price,
+        buyer_collateral,
+        seller_collateral,
+        match_time: trade_record.match_time,
+    });
+    
     Ok(())
 }
-```
 
-#### **Account Ownership Mechanics:**
-
-```rust
-// Account ownership flow:
-// 1. Client generates keypair
-let trade_keypair = Keypair::new();
-
-// 2. SystemProgram creates account with Trading Program as owner
-SystemProgram::create_account(
-    from: relayer,                    // Payer
-    to: trade_keypair.pubkey,        // New account address
-    lamports: rent_amount,           // SOL for rent exemption
-    space: TRADE_ACCOUNT_SIZE,       // Account data size
-    owner: TRADING_PROGRAM_ID,       // ← Program immediately owns account
-);
-
-// 3. Account is created with proper ownership
-AccountInfo {
-    key: trade_keypair.pubkey,
-    owner: TRADING_PROGRAM_ID,       // ← Already owned by Trading Program
-    lamports: rent_amount,
-    data: [0; TRADE_ACCOUNT_SIZE],   // Uninitialized data
-    executable: false,
+// Helper functions
+fn validate_orders(buy_order: &PreOrder, sell_order: &PreOrder) -> Result<()> {
+    // Basic order type validation
+    require!(buy_order.is_buy, TradingError::IncompatibleOrders);
+    require!(!sell_order.is_buy, TradingError::IncompatibleOrders);
+    
+    // Price validation
+    require!(buy_order.price == sell_order.price, TradingError::IncompatibleOrders);
+    require!(buy_order.price >= MIN_PRICE, TradingError::PriceTooLow);
+    require!(buy_order.price <= MAX_PRICE, TradingError::PriceTooHigh);
+    
+    // Token validation
+    require!(buy_order.collateral_token == sell_order.collateral_token, TradingError::IncompatibleOrders);
+    require!(buy_order.token_id == sell_order.token_id, TradingError::IncompatibleOrders);
+    
+    // Time validation
+    let current_time = Clock::get()?.unix_timestamp;
+    require!(current_time <= buy_order.deadline, TradingError::OrderExpired);
+    require!(current_time <= sell_order.deadline, TradingError::OrderExpired);
+    
+    // Amount validation
+    require!(buy_order.amount > 0, TradingError::ZeroAmount);
+    require!(sell_order.amount > 0, TradingError::ZeroAmount);
+    
+    // Self-trade prevention
+    require!(buy_order.trader != sell_order.trader, TradingError::SelfTrade);
+    
+    Ok(())
 }
 
-// 4. Trading Program can now modify account data
-// No ownership transfer needed - account belongs to program from creation
-```
-
-#### **Security Requirements:**
-
-```rust
-// Why trade_keypair must sign:
-// 1. Prevent account hijacking
-// 2. Ensure address ownership claim
-// 3. Solana security model enforcement
-
-// Transaction signature requirements:
-// - relayer: Pays for account creation and rent
-// - trade_keypair: Claims ownership of the address
-// - Both signatures required for security
-```
-
-#### **Integration with Business Logic:**
-
-```typescript
-// Complete order matching flow with keypair-based accounts
-export class OrcaTradeService {
-  // Admin creates token market
-  async createTokenMarket(
-    admin: Keypair,
-    symbol: string,
-    name: string,
-    settleTimeLimit: number
-  ): Promise<string> {
-    const { transaction, signers, tokenId } = 
-      await this.accountManager.createTokenMarket({
-        symbol,
-        name,
-        settleTimeLimit,
-      });
+fn calculate_collateral_requirements(
+    amount: u64,
+    price: u64,
+    economic_config: &EconomicConfig,
+) -> Result<(u64, u64)> {
+    let trade_value = amount
+        .checked_mul(price)
+        .ok_or(TradingError::MathOverflow)?
+        .checked_div(PRICE_SCALE)
+        .ok_or(TradingError::MathOverflow)?;
     
-    const txId = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      signers  // [admin, tokenKeypair]
-    );
+    let buyer_collateral = trade_value
+        .checked_mul(economic_config.buyer_collateral_ratio as u64)
+        .ok_or(TradingError::MathOverflow)?
+        .checked_div(10000)
+        .ok_or(TradingError::MathOverflow)?;
     
-    return tokenId.toString();  // EVM compatible naming
-  }
-
-  // Relayer matches orders (creates TradeRecord)
-  async matchOrders(
-    relayer: Keypair,
-    buyOrder: PreOrder,
-    sellOrder: PreOrder,
-    buySignature: Buffer,
-    sellSignature: Buffer,
-    fillAmount?: BN
-  ): Promise<string> {
-    // 1. Create TradeRecord account
-    const { createAccountIx, tradeKeypair, tradeId } = 
-      await this.accountManager.createTradeRecord({
-        buyOrder,
-        sellOrder,
-        fillAmount,
-      });
+    let seller_collateral = trade_value
+        .checked_mul(economic_config.seller_collateral_ratio as u64)
+        .ok_or(TradingError::MathOverflow)?
+        .checked_div(10000)
+        .ok_or(TradingError::MathOverflow)?;
     
-    // 2. Match orders instruction
-    const matchOrdersIx = await this.tradingProgram.methods
-      .matchOrders(buyOrder, sellOrder, Array.from(buySignature), Array.from(sellSignature), fillAmount)
-      .accounts({
-        tradeRecord: tradeId,
-        tokenMarket: buyOrder.token_id,  // EVM compatible naming
-        relayer: relayer.publicKey,
-        // ... vault CPI accounts
-      })
-      .instruction();
-    
-    // 3. Atomic transaction (create TradeRecord + match orders + CPI vault operations)
-    const transaction = new Transaction()
-      .add(createAccountIx)
-      .add(matchOrdersIx);
-    
-    const txId = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      [relayer, tradeKeypair]  // Both must sign
-    );
-    
-    return tradeId.toString();  // EVM compatible naming
-  }
-
-  // Settlement using TradeRecord address
-  async settleTrade(
-    seller: Keypair,
-    tradeId: PublicKey,  // EVM compatible naming
-    realTokenMint: PublicKey
-  ): Promise<string> {
-    const settleIx = await this.tradingProgram.methods
-      .settleTrade()
-      .accounts({
-        tradeRecord: tradeId,  // Direct address reference
-        seller: seller.publicKey,
-        realTokenMint,
-        // ... vault CPI accounts
-      })
-      .instruction();
-    
-    return await sendAndConfirmTransaction(
-      this.connection,
-      new Transaction().add(settleIx),
-      [seller]
-    );
-  }
+    Ok((buyer_collateral, seller_collateral))
 }
-```
+
+fn perform_collateral_locking(
+    ctx: &Context<MatchOrders>,
+    buyer_collateral: u64,
+    seller_collateral: u64,
+) -> Result<()> {
+    // CPI to vault: Lock buyer collateral
+    let slash_buyer_cpi = CpiContext::new(
+        ctx.accounts.vault_program.to_account_info(),
+        vault_program::cpi::accounts::SlashBalance {
+            config: ctx.accounts.vault_config.to_account_info(),
+            user_balance: ctx.accounts.buyer_balance.to_account_info(),
+            authority: ctx.accounts.vault_authority.to_account_info(),
+        },
+    );
+    vault_program::cpi::slash_balance(slash_buyer_cpi, buyer_collateral)?;
+    
+    // CPI to vault: Lock seller collateral
+    let slash_seller_cpi = CpiContext::new(
+        ctx.accounts.vault_program.to_account_info(),
+        vault_program::cpi::accounts::SlashBalance {
+            config: ctx.accounts.vault_config.to_account_info(),
+            user_balance: ctx.accounts.seller_balance.to_account_info(),
+            authority: ctx.accounts.vault_authority.to_account_info(),
+        },
+    );
+    vault_program::cpi::slash_balance(slash_seller_cpi, seller_collateral)?;
+    
+    Ok(())
+}
 
 ### **Advantages of User-Controlled Keypair Pattern:**
 
@@ -1464,7 +1685,6 @@ pub fn cancel_trade(ctx: Context<CancelTrade>) -> Result<()> {
     // ✅ CORRECT: Transfer tokens DIRECTLY to wallets (matches EVM)
     vault_program::cpi::transfer_out(
         cpi_ctx,
-        trade.collateral_mint,
         trade.buyer,           // → Buyer's external wallet
         buyer_receives,
     )?;
@@ -1472,7 +1692,6 @@ pub fn cancel_trade(ctx: Context<CancelTrade>) -> Result<()> {
     if seller_receives > 0 {
         vault_program::cpi::transfer_out(
             cpi_ctx,
-            trade.collateral_mint,
             trade.seller,       // → Seller's external wallet
             seller_receives,
         )?;
@@ -1498,3 +1717,174 @@ pub fn cancel_trade(ctx: Context<CancelTrade>) -> Result<()> {
 | **Destination** | External wallet | External wallet |
 | **Vault Balance** | Unchanged | Unchanged |
 | **Logic** | ✅ Direct transfer | ✅ Direct transfer |
+```
+
+#### **Account Size Constants**
+```rust
+// Account size calculations for rent exemption
+pub const VAULT_CONFIG_SIZE: usize = 8 + // discriminator
+    32 + // admin
+    32 + // emergency_admin
+    4 + (32 * 10) + // authorized_traders (Vec<Pubkey>, max 10)
+    1 + // paused
+    4 + // total_users
+    4 + (32 * 20) + // supported_tokens (Vec<Pubkey>, max 20)
+    1; // bump
+
+pub const USER_BALANCE_SIZE: usize = 8 + // discriminator
+    32 + // user
+    32 + // token_mint
+    8 + // balance
+    1; // bump
+
+pub const VAULT_AUTHORITY_SIZE: usize = 8 + // discriminator
+    32 + // token_mint
+    8 + // total_deposits
+    32 + // vault_ata
+    1; // bump
+
+pub const TRADE_CONFIG_SIZE: usize = 8 + // discriminator
+    32 + // admin
+    32 + // vault_program
+    4 + (32 * 10) + // relayers (Vec<Pubkey>, max 10)
+    (2 * 6) + // economic_config (6 u16 fields)
+    (2 * 4) + (4 * 3) + // technical_config (4 u16 + 3 u32 fields)
+    1 + // paused
+    1; // bump
+
+pub const TOKEN_MARKET_SIZE: usize = 8 + // discriminator
+    32 + // token_id
+    4 + 10 + // symbol (String, max 10 chars)
+    4 + 50 + // name (String, max 50 chars)
+    1 + 32 + // real_mint (Option<Pubkey>)
+    1 + 8 + // mapping_time (Option<i64>)
+    4 + // settle_time_limit
+    8; // created_at
+
+pub const TRADE_RECORD_SIZE: usize = 8 + // discriminator
+    32 + // trade_id
+    32 + // buyer
+    32 + // seller
+    32 + // token_id
+    32 + // collateral_mint
+    8 + // filled_amount
+    8 + // price
+    8 + // buyer_collateral
+    8 + // seller_collateral
+    8 + // match_time
+    1 + // settled
+    1 + 32; // target_mint (Option<Pubkey>)
+
+pub const ORDER_STATUS_SIZE: usize = 8 + // discriminator
+    32 + // order_hash
+    32 + // trader
+    8 + // total_amount
+    8 + // filled_amount
+    2 + // fill_count
+    8 + // last_fill_time
+    1 + // cancelled
+    1; // bump
+```
+
+---
+
+## ✅ **IMPLEMENTATION CHECKLIST**
+
+### **🔧 Before Starting Development:**
+
+#### **Environment Setup:**
+- [ ] Install Anchor framework (latest version)
+- [ ] Set up Solana CLI and test validator
+- [ ] Configure development keypairs and program IDs
+- [ ] Set up TypeScript client environment
+
+#### **Program Structure:**
+- [ ] Create vault program with all defined structs and instructions
+- [ ] Create trading program with all defined structs and instructions
+- [ ] Implement all error types and validation functions
+- [ ] Add proper account constraints and security checks
+
+#### **Cross-Program Integration:**
+- [ ] Implement CPI calls from trading to vault program
+- [ ] Test CPI error handling and propagation
+- [ ] Validate account ownership across programs
+- [ ] Test authorization mechanisms
+
+#### **Business Logic Implementation:**
+- [ ] Implement all economic calculations with safe math
+- [ ] Add signature verification for orders
+- [ ] Implement partial fill logic and order tracking
+- [ ] Add grace period and settlement mechanics
+
+#### **Testing Strategy:**
+- [ ] Unit tests for all calculation functions
+- [ ] Integration tests for cross-program calls
+- [ ] End-to-end tests for complete trading flows
+- [ ] Stress tests for concurrent operations
+- [ ] Security tests for edge cases and attacks
+
+### **🚀 Deployment Checklist:**
+
+#### **Pre-Deployment:**
+- [ ] Security audit of both programs
+- [ ] Performance testing and optimization
+- [ ] Documentation review and updates
+- [ ] Client SDK development and testing
+
+#### **Deployment Process:**
+- [ ] Deploy vault program first (independent)
+- [ ] Deploy trading program (references vault program ID)
+- [ ] Initialize vault with admin keys and supported tokens
+- [ ] Initialize trading with economic/technical configs
+- [ ] Authorize trading program in vault config
+- [ ] Test all functions on devnet/testnet
+
+#### **Post-Deployment:**
+- [ ] Monitor program performance and errors
+- [ ] Set up alerting for critical issues
+- [ ] Prepare upgrade procedures
+- [ ] Document operational procedures
+
+---
+
+## 📋 **FINAL IMPLEMENTATION NOTES**
+
+### **🎯 Key Success Factors:**
+
+1. **Security First**: All account validations and constraints must be implemented exactly as specified
+2. **Economic Accuracy**: All calculations must match EVM implementation exactly
+3. **Cross-Program Reliability**: CPI calls must handle all error cases gracefully
+4. **Client Compatibility**: TypeScript client must provide seamless developer experience
+5. **Performance**: Target <$0.01 per operation and <10 second settlement latency
+
+### **🔍 Critical Implementation Points:**
+
+1. **Account Sizes**: Use exact sizes defined in constants to avoid rent issues
+2. **Error Handling**: Implement all error types for proper debugging
+3. **Signature Verification**: Use ed25519 verification exactly as specified
+4. **CPI Security**: Validate all cross-program calls and account ownership
+5. **Economic Logic**: Use safe math for all calculations to prevent overflow
+
+### **📚 Additional Resources:**
+
+- **Anchor Documentation**: https://anchor-lang.com/
+- **Solana Program Library**: https://spl.solana.com/
+- **Cross-Program Invocation Guide**: https://docs.solana.com/developing/programming-model/calling-between-programs
+- **Security Best Practices**: https://github.com/coral-xyz/sealevel-attacks
+
+### **🎉 Ready for Implementation**
+
+This document now provides a complete, unambiguous specification for implementing the Orca Contracts pre-market trading system on Solana. All major ambiguities have been resolved:
+
+✅ **Complete struct definitions** with proper field types and constraints  
+✅ **Unified instruction enums** for both programs  
+✅ **Comprehensive error definitions** for all edge cases  
+✅ **Account size constants** for proper rent calculation  
+✅ **CPI function signatures** that match actual usage  
+✅ **Security validations** and account constraints  
+✅ **Business logic implementations** with safe math  
+✅ **TypeScript client constants** for seamless integration  
+
+The specification maintains **100% business logic compatibility** with the EVM implementation while leveraging Solana's unique architecture advantages.
+
+**Next Step**: Begin implementation following the roadmap phases, starting with the vault program foundation.
