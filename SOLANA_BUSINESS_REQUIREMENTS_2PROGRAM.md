@@ -523,9 +523,6 @@ pub const MAX_PENALTY_BPS: u16 = 10000; // 100%
 // Technical limits
 pub const MAX_SYMBOL_LENGTH: usize = 10;
 pub const MAX_NAME_LENGTH: usize = 50;
-pub const MAX_AUTHORIZED_TRADERS: usize = 10;
-pub const MAX_SUPPORTED_TOKENS: usize = 20;
-pub const MAX_RELAYERS: usize = 10;
 
 // NOTE: TokenMarket and TradeRecord are user-controlled keypairs, not PDAs
 // - TokenMarket: Client generates keypair, address stored as token_id field
@@ -620,58 +617,30 @@ pub enum TradingError {
 
 #### **From Trading Program to Vault Program:**
 ```rust
-// In match_orders instruction
-pub fn match_orders(ctx: Context<MatchOrders>, /* params */) -> Result<()> {
-    // 1. Validate orders and signatures
-    validate_orders(&buy_order, &sell_order)?;
-    verify_signatures(&buy_order, &sell_order, &signatures)?;
-    
-    // 2. Calculate collateral requirements
-    let (buyer_collateral, seller_collateral) = calculate_collateral(
-        fill_amount, 
-        price, 
-        &ctx.accounts.config.economic_config
-    )?;
-    
-    // 3. CPI to vault: Subtract buyer collateral (exact EVM slashBalance)
-    let slash_buyer_accounts = SlashBalance {
+// Example CPI pattern for collateral locking
+let slash_buyer_cpi = CpiContext::new(
+    ctx.accounts.vault_program.to_account_info(),
+    vault_program::cpi::accounts::SlashBalance {
         config: ctx.accounts.vault_config.to_account_info(),
         user_balance: ctx.accounts.buyer_balance.to_account_info(),
         authority: ctx.accounts.vault_authority.to_account_info(),
-    };
-    
-    let cpi_ctx = CpiContext::new(
-        ctx.accounts.vault_program.to_account_info(),
-        slash_buyer_accounts,
-    );
-    
-    vault_program::cpi::slash_balance(
-        cpi_ctx,
-        buyer_collateral,
-    )?;
-    
-    // 4. CPI to vault: Subtract seller collateral (exact EVM slashBalance)
-    let slash_seller_accounts = SlashBalance {
+    },
+);
+vault_program::cpi::slash_balance(slash_buyer_cpi, buyer_collateral)?;
+
+// Example CPI pattern for token transfers
+let transfer_out_cpi = CpiContext::new(
+    ctx.accounts.vault_program.to_account_info(),
+    vault_program::cpi::accounts::TransferOut {
         config: ctx.accounts.vault_config.to_account_info(),
-        user_balance: ctx.accounts.seller_balance.to_account_info(),
-        authority: ctx.accounts.vault_authority.to_account_info(),
-    };
-    
-    let cpi_ctx = CpiContext::new(
-        ctx.accounts.vault_program.to_account_info(),
-        slash_seller_accounts,
-    );
-    
-    vault_program::cpi::slash_balance(
-        cpi_ctx,
-        seller_collateral,
-    )?;
-    
-    // 5. Create trade record
-    create_trade_record(ctx, &buy_order, &sell_order, fill_amount)?;
-    
-    Ok(())
-}
+        user_balance: ctx.accounts.user_balance.to_account_info(),
+        vault_authority: ctx.accounts.vault_authority.to_account_info(),
+        vault_ata: ctx.accounts.vault_ata.to_account_info(),
+        recipient_ata: ctx.accounts.recipient_ata.to_account_info(),
+        token_program: ctx.accounts.token_program.to_account_info(),
+    },
+);
+vault_program::cpi::transfer_out(transfer_out_cpi, amount)?;
 ```
 
 ### **B. Account Validation**
@@ -1174,7 +1143,7 @@ pub struct TokenMapped {
 4. ✅ Test integration scenarios
 
 ### **Phase 4: Business Logic Implementation**
-1. ✅ Order matching with CPI collateral locking
+1. ✅ Order matching with CPI collateral
 2. ✅ Settlement with CPI token transfers
 3. ✅ Cancellation with CPI penalty distribution
 4. ✅ Partial fill support
@@ -1275,9 +1244,9 @@ export const TOKEN_MINTS = {
 #[instruction(symbol: String, name: String, settle_time_limit: u32)]
 pub struct CreateTokenMarket<'info> {
     #[account(
-        init,
-        payer = admin,
-        space = TOKEN_MARKET_SIZE,
+        mut,
+        constraint = token_market.owner == &crate::ID,
+        constraint = token_market.data_len() == TOKEN_MARKET_SIZE,
         constraint = symbol.len() <= MAX_SYMBOL_LENGTH @ TradingError::SymbolTooLong,
         constraint = name.len() <= MAX_NAME_LENGTH @ TradingError::NameTooLong,
         constraint = settle_time_limit >= 3600 @ TradingError::InvalidSettleTime,
@@ -1324,8 +1293,6 @@ pub fn create_token_market(
     
     Ok(())
 }
-
-
 
 pub fn match_orders(
     ctx: Context<MatchOrders>,
