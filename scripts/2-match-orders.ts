@@ -1,5 +1,6 @@
 import { ethers } from "hardhat";
 import { PreMarketTrade } from "../typechain-types";
+import { OrderInfo, _hashTypedDataV4, _buildDomainSeparator, _getOrderStructHash, calculateOrderHash } from "./utils/order-hash";
 
 /**
  * @title Match Orders Script
@@ -10,16 +11,8 @@ import { PreMarketTrade } from "../typechain-types";
 // Constants
 const DECIMALS = 6; // USDC decimals
 
-interface OrderInfo {
-    trader: string;
-    collateralToken: string;
-    targetTokenId: string;
-    amount: string; // Wei format
-    price: string; // Wei format (price per unit)
-    isBuy: boolean;
-    nonce: string;
-    deadline: string; // Unix timestamp
-}
+
+
 
 interface MatchOrdersConfig {
     buyOrder: OrderInfo;
@@ -167,6 +160,8 @@ async function matchOrders(config: MatchOrdersConfig) {
             config.buyOrder.nonce,
             config.buyOrder.deadline
         ];
+        const buyOrderHash = _hashTypedDataV4(_buildDomainSeparator("PreMarketTrade", "1", chainId, CONTRACT_ADDRESS), _getOrderStructHash(config.buyOrder));
+        console.log("🔐 Buy Order Hash:", buyOrderHash);
 
         const sellOrderStruct = [
             config.sellOrder.trader,
@@ -178,6 +173,8 @@ async function matchOrders(config: MatchOrdersConfig) {
             config.sellOrder.nonce,
             config.sellOrder.deadline
         ];
+        const sellOrderHash = _hashTypedDataV4(_buildDomainSeparator("PreMarketTrade", "1", chainId, CONTRACT_ADDRESS), _getOrderStructHash(config.sellOrder));
+        console.log("🔐 Sell Order Hash:", sellOrderHash);
 
         const fillAmount = config.fillAmount || "0"; // 0 means auto calculate
 
@@ -315,7 +312,16 @@ async function main() {
 }
 
 // Export function for use in other scripts
-export { matchOrders, MatchOrdersConfig, OrderInfo, signOrder };
+export {
+    matchOrders,
+    MatchOrdersConfig,
+    OrderInfo,
+    signOrder,
+    _hashTypedDataV4,
+    _buildDomainSeparator,
+    _getOrderStructHash,
+    calculateOrderHash,
+};
 
 // Run if called directly
 if (require.main === module) {
