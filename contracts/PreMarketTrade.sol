@@ -192,7 +192,8 @@ contract PreMarketTrade is
     event TradeCancelled(
         uint256 indexed tradeId, 
         address indexed buyer,
-        uint256 penaltyAmount
+        uint256 penaltyAmount,
+        address indexed collateralToken
     );
 
     /**
@@ -543,7 +544,7 @@ contract PreMarketTrade is
         // Emit events
         emit CollateralUnlocked(trade.buyer.trader, trade.buyer.collateralToken, trade.buyerCollateral, tradeId);
         emit CollateralUnlocked(trade.seller.trader, trade.buyer.collateralToken, trade.sellerCollateral, tradeId);
-        emit TradeCancelled(tradeId, trade.buyer.trader, penaltyAmount);
+        emit TradeCancelled(tradeId, trade.buyer.trader, penaltyAmount, trade.buyer.collateralToken);
     }
 
     /**
