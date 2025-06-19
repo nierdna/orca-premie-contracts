@@ -2,6 +2,8 @@ import { getAllEvents, streamEvents } from "aiia-vault-sdk/dist/utils";
 import { ethers } from "ethers";
 import json from "../artifacts/contracts/PreMarketTrade.sol/PreMarketTrade.json";
 import { formatEvent } from "./utils/format-events";
+import 'dotenv/config'
+import { OrderMatchedEvent, RawEventData } from "../types/events";
 
 const main = async () => {
     console.log('   ✅ Start stream events')
@@ -25,17 +27,19 @@ const main = async () => {
     await streamEvents(
         {
             getProvider: getProvider,
-            getAllEvents: async (fromBlock, toBlock,) => {
+            getAllEvents: async (fromBlock, toBlock, whitelistEvents) => {
                 return await getAllEvents(
                     getContract(),
                     getProvider,
                     getContract,
                     fromBlock,
                     toBlock,
+                    whitelistEvents
                 )
             },
             formatEvent: async (event) => {
-                return await formatEvent(event, getProvider)
+                const formattedEvent = await formatEvent(event, getProvider)
+                return new OrderMatchedEvent(formattedEvent as RawEventData)
             },
             onEvent: async (event) => {
                 console.log('✅ event', event)
