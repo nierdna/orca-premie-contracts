@@ -132,21 +132,6 @@ async function matchOrders(config: MatchOrdersConfig) {
         // Sign orders
         console.log("🔏 Generating signatures...");
 
-        // Assume buyer signs buy order, seller signs sell order
-        const buySignature = await signOrder(
-            config.buyOrder,
-            buyer, // Should be actual buyer signer
-            CONTRACT_ADDRESS,
-            chainId
-        );
-
-        const sellSignature = await signOrder(
-            config.sellOrder,
-            seller, // Should be actual seller signer
-            CONTRACT_ADDRESS,
-            chainId
-        );
-
         console.log("✅ Signatures generated");
 
         // Prepare order structs for contract call
@@ -182,8 +167,6 @@ async function matchOrders(config: MatchOrdersConfig) {
         const gasEstimate = await (preMarketTrade as any).connect(relayer).matchOrders.estimateGas(
             buyOrderStruct,
             sellOrderStruct,
-            buySignature,
-            sellSignature,
             fillAmount
         );
 
@@ -194,8 +177,6 @@ async function matchOrders(config: MatchOrdersConfig) {
         const tx = await (preMarketTrade as any).connect(relayer).matchOrders(
             buyOrderStruct,
             sellOrderStruct,
-            buySignature,
-            sellSignature,
             fillAmount,
             {
                 gasLimit: gasEstimate + BigInt(100000) // Add buffer
