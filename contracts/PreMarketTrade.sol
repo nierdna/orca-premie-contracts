@@ -330,16 +330,12 @@ contract PreMarketTrade is
      * @dev Chỉ relayer được phép gọi function này
      * @param buyOrder Order của buyer
      * @param sellOrder Order của seller  
-     * @param sigBuy Chữ ký của buyer
-     * @param sigSell Chữ ký của seller
      * @param fillAmount Số lượng muốn fill (0 = auto calculate max possible)
      * @return tradeId ID của giao dịch mới tạo
      */
     function matchOrders(
         PreOrder calldata buyOrder,
         PreOrder calldata sellOrder,
-        bytes calldata sigBuy,
-        bytes calldata sigSell,
         uint256 fillAmount
     ) external onlyRole(RELAYER_ROLE) nonReentrant whenNotPaused returns (uint256 tradeId) {
         // Basic validations
