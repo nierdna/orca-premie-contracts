@@ -513,10 +513,20 @@ export class TokenMarketCreatedEvent implements IBlockchainEvent {
         if (!address || typeof address !== 'string') {
             throw new Error(`Invalid ${fieldName}: must be a string`);
         }
-        // Basic validation for Solana address format
+
+        // Check if it's Ethereum address format
+        if (address.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum address`);
+            }
+            return address.toLowerCase();
+        }
+
+        // Check if it's Solana address format (32-44 chars, Base58 alphabet)
         if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             throw new Error(`Invalid ${fieldName}: must be a valid Solana address`);
         }
+
         return address;
     }
 
@@ -581,7 +591,7 @@ export class TokenMappedEvent implements IBlockchainEvent {
         this.sender = normalized.sender;
 
         const args = normalized.args;
-        this.tokenId = this.validateAddressOrBase58(args.tokenId, 'tokenId');
+        this.tokenId = this.validateHashOrBase58(args.tokenId, 'tokenId');
         this.realMint = this.validateAddressOrBase58(args.realMint, 'realMint');
         this.mappingTime = Number(args.mappingTime);
     }
@@ -604,16 +614,57 @@ export class TokenMappedEvent implements IBlockchainEvent {
                 }
             };
         }
+
+        if (data.args.realAddress) {
+            data.args.realMint = data.args.realAddress
+            data.args.mappingTime = data.timestamp
+        }
+
         return data as RawEventData;
+    }
+
+    /**
+     * Validate hash format (supports both Ethereum hex and Solana Base58)
+     */
+    private validateHashOrBase58(hash: string, fieldName: string): string {
+        if (!hash || typeof hash !== 'string') {
+            throw new Error(`Invalid ${fieldName}: must be a string ${hash}`);
+        }
+
+        // Check if it's Ethereum hex format (64 chars for hash)
+        if (hash.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{64}$/.test(hash)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum hash`);
+            }
+            return hash.toLowerCase();
+        }
+
+        // Check if it's Solana Base58 format (32-64 chars, Base58 alphabet)
+        if (!/^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(hash)) {
+            throw new Error(`Invalid ${fieldName}: must be a valid Solana Base58 string`);
+        }
+
+        return hash;
     }
 
     private validateAddressOrBase58(address: string, fieldName: string): string {
         if (!address || typeof address !== 'string') {
-            throw new Error(`Invalid ${fieldName}: must be a string`);
+            throw new Error(`Invalid ${fieldName}: must be a string ${address}`);
         }
+
+        // Check if it's Ethereum address format
+        if (address.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum address ${address}`);
+            }
+            return address.toLowerCase();
+        }
+
+        // Check if it's Solana address format (32-44 chars, Base58 alphabet)
         if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             throw new Error(`Invalid ${fieldName}: must be a valid Solana address`);
         }
+
         return address;
     }
 
@@ -683,14 +734,14 @@ export class TradeSettledEvent implements IBlockchainEvent {
         this.collateralDecimals = normalized.collateralDecimals;
 
         const args = normalized.args;
-        this.tradeId = this.validateAddressOrBase58(args.tradeId, 'tradeId');
-        this.tokenId = this.validateAddressOrBase58(args.tokenId, 'tokenId');
-        this.buyer = this.validateAddressOrBase58(args.buyer, 'buyer');
-        this.seller = this.validateAddressOrBase58(args.seller, 'seller');
-        this.targetMint = this.validateAddressOrBase58(args.targetMint, 'targetMint');
-        this.filledAmount = this.validateAmount(args.filledAmount, 'filledAmount');
-        this.sellerReward = this.validateAmount(args.sellerReward, 'sellerReward');
-        this.settlementTime = Number(args.settlementTime);
+        this.tradeId = args.tradeId;
+        this.tokenId = args.tokenId;
+        this.buyer = args.buyer;
+        this.seller = args.seller;
+        this.targetMint = args.targetMint;
+        this.filledAmount = this.validateAmount(args.filledAmount?.toString() || "0", 'filledAmount');
+        this.sellerReward = this.validateAmount(args.sellerReward?.toString() || "0", 'sellerReward');
+        this.settlementTime = Number(args.settlementTime || 0);
     }
 
     private normalizeEventData(data: EventInput): RawEventData & { collateralDecimals?: number } {
@@ -717,16 +768,32 @@ export class TradeSettledEvent implements IBlockchainEvent {
                 }
             };
         }
+
+        if (data.args.targetToken) {
+            data.args.targetMint = data.args.targetToken
+        }
+
         return data as RawEventData;
     }
 
     private validateAddressOrBase58(address: string, fieldName: string): string {
         if (!address || typeof address !== 'string') {
-            throw new Error(`Invalid ${fieldName}: must be a string`);
+            throw new Error(`Invalid ${fieldName}: must be a string ${address}`);
         }
+
+        // Check if it's Ethereum address format
+        if (address.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum address`);
+            }
+            return address.toLowerCase();
+        }
+
+        // Check if it's Solana address format (32-44 chars, Base58 alphabet)
         if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             throw new Error(`Invalid ${fieldName}: must be a valid Solana address`);
         }
+
         return address;
     }
 
@@ -852,9 +919,20 @@ export class OrderCancelledEvent implements IBlockchainEvent {
         if (!address || typeof address !== 'string') {
             throw new Error(`Invalid ${fieldName}: must be a string`);
         }
+
+        // Check if it's Ethereum address format
+        if (address.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum address`);
+            }
+            return address.toLowerCase();
+        }
+
+        // Check if it's Solana address format (32-44 chars, Base58 alphabet)
         if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             throw new Error(`Invalid ${fieldName}: must be a valid Solana address`);
         }
+
         return address;
     }
 
@@ -971,9 +1049,20 @@ export class TradeCancelledEvent implements IBlockchainEvent {
         if (!address || typeof address !== 'string') {
             throw new Error(`Invalid ${fieldName}: must be a string`);
         }
+
+        // Check if it's Ethereum address format
+        if (address.startsWith('0x')) {
+            if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                throw new Error(`Invalid ${fieldName}: must be a valid Ethereum address`);
+            }
+            return address.toLowerCase();
+        }
+
+        // Check if it's Solana address format (32-44 chars, Base58 alphabet)
         if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             throw new Error(`Invalid ${fieldName}: must be a valid Solana address`);
         }
+
         return address;
     }
 

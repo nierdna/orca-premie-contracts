@@ -278,7 +278,7 @@ async function main() {
     // Example configurations
     const examples: SettleTradeConfig[] = [
         {
-            tradeId: "1",
+            tradeId: "7",
             targetTokenAddress: "0xd01ceeEa03fbadfA1B5aa5C1891a683c02f38C8f" // Replace with real token address
         },
         {

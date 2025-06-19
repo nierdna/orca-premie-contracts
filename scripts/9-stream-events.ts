@@ -26,7 +26,7 @@ const main = async () => {
         );
     };
 
-    const from = 27270140;
+    const from = 27292982;
 
     console.log(`   ✅ From block: ${from}`)
 
@@ -39,11 +39,23 @@ const main = async () => {
         "TradeCancelled",       // Trade cancellation
     ];
 
+    const events = await getAllEvents(
+        getContract(),
+        getProvider,
+        getContract,
+        from,
+        from + 1000,
+        whitelistEvents
+    )
+
+    console.log('events', events)
+    // process.exit(0)
+
     await streamEvents(
         {
             getProvider: getProvider,
             getAllEvents: async (fromBlock, toBlock, whitelistEvents) => {
-                return await getAllEvents(
+                const events = await getAllEvents(
                     getContract(),
                     getProvider,
                     getContract,
@@ -51,9 +63,9 @@ const main = async () => {
                     toBlock,
                     whitelistEvents
                 )
+                return events
             },
             formatEvent: async (event) => {
-                // formatEvent now handles all the switch case logic and returns typed events
                 return await formatEvent(event, getProvider);
             },
             onEvent: async (event: any) => {
@@ -118,7 +130,7 @@ const main = async () => {
                 console.log(`💾 Saved latest block: ${blockNumber}`);
             },
             fromBlock: from,
-            blockGap: 1000,
+            blockGap: 1,
             whitelistEvents: whitelistEvents,
             shouldContinue: async () => {
                 return true
@@ -134,7 +146,7 @@ if (require.main === module) {
             process.exit(0);
         })
         .catch((error) => {
-            console.error('\n❌ Event streaming failed:', error);
+            console.trace('\n❌ Event streaming failed:', error);
             process.exit(1);
         });
 }

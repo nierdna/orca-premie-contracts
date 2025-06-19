@@ -149,9 +149,9 @@ async function main() {
         //     settleTimeLimitDays: 30
         // },
         {
-            symbol: "DEGEN-V2",
+            symbol: "DEGEN-V3",
             name: "Degen Protocol V2",
-            settleTimeLimitDays: 1 / 24 / 60 / 2 // 30 seconds
+            settleTimeLimitDays: 1 / 24 / 60 * 2 // 2 minutes
         },
         {
             symbol: "AI-COIN",
