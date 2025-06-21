@@ -20,3 +20,5 @@ cache
 .openzeppelin/
 
 base-sepolia.json
+
+deployments/
