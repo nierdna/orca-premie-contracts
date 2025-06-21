@@ -136,7 +136,8 @@ contract PreMarketTradeV2 is
         bytes32[] orderIds,
         address indexed buyer,
         address indexed collateralToken,
-        uint256 amount
+        uint256 amount,
+        uint256 protocolFee
     );
     
     event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
@@ -291,15 +292,27 @@ contract PreMarketTradeV2 is
         // Mark as processed
         processedCancellations[structHash] = true;
 
-        // Transfer collateral back to buyer
-        vault.transferOut(data.collateralToken, data.buyer, data.amount);
+        // Calculate protocol fee from cancellation amount
+        uint256 protocolFee = (data.amount * protocolFeeBps) / 10000;
+        uint256 buyerReceives = data.amount - protocolFee;
+
+        // Transfer collateral back to buyer (less fee)
+        if (buyerReceives > 0) {
+            vault.transferOut(data.collateralToken, data.buyer, buyerReceives);
+        }
+
+        // Transfer protocol fee to treasury
+        if (protocolFee > 0 && treasury != address(0)) {
+            vault.transferOut(data.collateralToken, treasury, protocolFee);
+        }
 
         emit Cancellation(
             structHash,
             data.orderIds,
             data.buyer,
             data.collateralToken,
-            data.amount
+            data.amount,
+            protocolFee
         );
     }
 

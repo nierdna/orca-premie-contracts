@@ -190,6 +190,20 @@ async function main() {
     }
 }
 
+// Hàm upgrade contract (gọi riêng khi cần upgrade)
+async function upgradeContract(proxyAddress: string) {
+    console.log("Upgrading PreMarketTradeV2...");
+
+    const PreMarketTradeV2 = await ethers.getContractFactory("PreMarketTradeV2");
+    const upgraded = await upgrades.upgradeProxy(proxyAddress, PreMarketTradeV2);
+
+    console.log("PreMarketTradeV2 upgraded");
+    const newImplAddress = await upgrades.erc1967.getImplementationAddress(proxyAddress);
+    console.log("New implementation address:", newImplAddress);
+
+    return upgraded;
+}
+
 // Export functions for use in other scripts
 export {
     deployPreMarketTradeV2,
@@ -198,7 +212,7 @@ export {
 
 // Run if called directly
 if (require.main === module) {
-    main()
+    upgradeContract('0x7eE4Fe459d6438e6E757Cc0f1144907c308d7f6B')
         .then(() => {
             console.log("🎉 Ultra-Simple Deployment completed successfully!");
             process.exit(0);
