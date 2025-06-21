@@ -86,7 +86,7 @@ async function main() {
             admin: deployer.address,
             treasury: deployer.address,
             protocolFeeBps: 500, // 5% for testnet
-            vault: '0x6B4792a57caBEbE6363ce3C0354D1494e63d0320',
+            vault: process.env.ESCROW_VAULT_ADDRESS!,
             network: "base-sepolia",
             gasPrice: "20000000000", // 20 gwei
             verify: true,

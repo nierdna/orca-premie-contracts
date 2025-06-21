@@ -10,7 +10,7 @@ async function main() {
     // const vault = await EscrowVault.deploy();
     // await vault.waitForDeployment();
     // const vaultAddress = await vault.getAddress();
-    const vaultAddress = '0x6B4792a57caBEbE6363ce3C0354D1494e63d0320';
+    const vaultAddress = process.env.ESCROW_VAULT_ADDRESS!;
     console.log("EscrowVault deployed to:", vaultAddress);
 
     // Deploy PreMarketTrade as upgradeable proxy

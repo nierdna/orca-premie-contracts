@@ -142,6 +142,7 @@ contract PreMarketTradeV2 is
     
     event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
+    event VaultUpdated(address oldVault, address newVault);
 
     // ============ Errors ============
     error InvalidSettlementData();
@@ -389,6 +390,19 @@ contract PreMarketTradeV2 is
         address oldTreasury = treasury;
         treasury = newTreasury;
         emit TreasuryUpdated(oldTreasury, newTreasury);
+    }
+
+    /**
+     * @notice Update vault address
+     * @dev Only admin can update vault - be careful as this affects all escrow operations
+     */
+    function setVault(address newVault) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newVault != address(0), "Invalid vault address");
+        require(newVault != address(vault), "Same vault address");
+        
+        address oldVault = address(vault);
+        vault = EscrowVault(newVault);
+        emit VaultUpdated(oldVault, newVault);
     }
 
     /**
