@@ -60,7 +60,7 @@ const main = async () => {
 
     const getContract = () => {
         return new ethers.BaseContract(
-            process.env.PREMARKET_V2_CONTRACT || "",
+            process.env.V2_CONTRACT || "",
             json.abi,
             getProvider()
         );
