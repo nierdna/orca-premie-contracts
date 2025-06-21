@@ -8,7 +8,8 @@ async function addTrader() {
 
     // Contract addresses from environment or hardcoded
     const ESCROW_VAULT_ADDRESS = process.env.ESCROW_VAULT_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-    const TRADER_ADDRESS = process.env.TRADER_ADDRESS || process.env.PREMARKET_CONTRACT || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
+    const TRADER_ADDRESS = '0x7eE4Fe459d6438e6E757Cc0f1144907c308d7f6B'
+    // const TRADER_ADDRESS = process.env.TRADER_ADDRESS || process.env.PREMARKET_CONTRACT || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 
     console.log("🏦 EscrowVault address:", ESCROW_VAULT_ADDRESS);
     console.log("🤖 Trader address:", TRADER_ADDRESS);
