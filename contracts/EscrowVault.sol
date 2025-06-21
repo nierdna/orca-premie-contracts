@@ -40,16 +40,18 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
      * @param user Địa chỉ user
      * @param token Địa chỉ token
      * @param amount Số lượng deposit
+     * @param newBalance Balance mới của user sau khi deposit
      */
-    event Deposited(address indexed user, address indexed token, uint256 amount);
+    event Deposited(address indexed user, address indexed token, uint256 amount, uint256 newBalance);
 
     /**
      * @notice Phát ra khi user withdraw token từ vault
      * @param user Địa chỉ user
      * @param token Địa chỉ token
      * @param amount Số lượng withdraw
+     * @param newBalance Balance mới của user sau khi withdraw
      */
-    event Withdrawn(address indexed user, address indexed token, uint256 amount);
+    event Withdrawn(address indexed user, address indexed token, uint256 amount, uint256 newBalance);
 
     /**
      * @notice Phát ra khi balance bị slash (trừ) bởi trader contract
@@ -57,12 +59,14 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
      * @param token Địa chỉ token
      * @param amount Số lượng bị slash
      * @param operator Contract thực hiện slash
+     * @param newBalance Balance mới của user sau khi slash
      */
     event BalanceSlashed(
         address indexed user,
         address indexed token,
         uint256 amount,
-        address indexed operator
+        address indexed operator,
+        uint256 newBalance
     );
 
     /**
@@ -71,12 +75,14 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
      * @param token Địa chỉ token
      * @param amount Số lượng được credit
      * @param operator Contract thực hiện credit
+     * @param newBalance Balance mới của user sau khi credit
      */
     event BalanceCredited(
         address indexed user,
         address indexed token,
         uint256 amount,
-        address indexed operator
+        address indexed operator,
+        uint256 newBalance
     );
 
     // ============ Errors ============
@@ -116,7 +122,7 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         balances[msg.sender][token] += amount;
         totalDeposits[token] += amount;
         
-        emit Deposited(msg.sender, token, amount);
+        emit Deposited(msg.sender, token, amount, balances[msg.sender][token]);
     }
 
     /**
@@ -139,7 +145,7 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         // Transfer token từ vault về user
         IERC20(token).safeTransfer(msg.sender, amount);
         
-        emit Withdrawn(msg.sender, token, amount);
+        emit Withdrawn(msg.sender, token, amount, balances[msg.sender][token]);
     }
 
     /**
@@ -159,7 +165,7 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         // Trừ balance của user
         balances[user][token] -= amount;
         
-        emit BalanceSlashed(user, token, amount, msg.sender);
+        emit BalanceSlashed(user, token, amount, msg.sender, balances[user][token]);
     }
 
     /**
@@ -178,7 +184,7 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         // Cộng balance cho user
         balances[user][token] += amount;
         
-        emit BalanceCredited(user, token, amount, msg.sender);
+        emit BalanceCredited(user, token, amount, msg.sender, balances[user][token]);
     }
 
     /**
@@ -202,8 +208,8 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         balances[from][token] -= amount;
         balances[to][token] += amount;
         
-        emit BalanceSlashed(from, token, amount, msg.sender);
-        emit BalanceCredited(to, token, amount, msg.sender);
+        emit BalanceSlashed(from, token, amount, msg.sender, balances[from][token]);
+        emit BalanceCredited(to, token, amount, msg.sender, balances[to][token]);
     }
 
     /**
@@ -219,7 +225,7 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
     {
         if (amount == 0) revert ZeroAmount();
         IERC20(token).safeTransfer(to, amount);
-        emit Withdrawn(to, token, amount); // Tái sử dụng event Withdrawn
+        emit Withdrawn(to, token, amount, balances[to][token]); // Tái sử dụng event Withdrawn
     }
 
     // ============ View Functions ============

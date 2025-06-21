@@ -14,6 +14,7 @@ interface DepositedEvent {
     user: string;
     token: string;
     amount: bigint;
+    newBalance: bigint;
 }
 
 interface WithdrawnEvent {
@@ -24,6 +25,7 @@ interface WithdrawnEvent {
     user: string;
     token: string;
     amount: bigint;
+    newBalance: bigint;
 }
 
 interface BalanceSlashedEvent {
@@ -35,6 +37,7 @@ interface BalanceSlashedEvent {
     token: string;
     amount: bigint;
     operator: string;
+    newBalance: bigint;
 }
 
 interface BalanceCreditedEvent {
@@ -46,6 +49,7 @@ interface BalanceCreditedEvent {
     token: string;
     amount: bigint;
     operator: string;
+    newBalance: bigint;
 }
 
 const main = async () => {
@@ -104,30 +108,36 @@ const main = async () => {
                         case 'Deposited':
                             const depositedEvent = event as DepositedEvent;
                             const formattedDepositAmount = formatTokenAmount(depositedEvent.amount, depositedEvent.token, getProvider());
+                            const formattedDepositBalance = formatTokenAmount(depositedEvent.newBalance, depositedEvent.token, getProvider());
 
                             console.log(`   👤 User: ${depositedEvent.user}`);
                             console.log(`   🪙 Token: ${depositedEvent.token}`);
                             console.log(`   💰 Amount: ${formattedDepositAmount}`);
+                            console.log(`   🏦 New Balance: ${formattedDepositBalance}`);
                             console.log(`   📈 Action: User deposited tokens into vault`);
                             break;
 
                         case 'Withdrawn':
                             const withdrawnEvent = event as WithdrawnEvent;
                             const formattedWithdrawAmount = formatTokenAmount(withdrawnEvent.amount, withdrawnEvent.token, getProvider());
+                            const formattedWithdrawBalance = formatTokenAmount(withdrawnEvent.newBalance, withdrawnEvent.token, getProvider());
 
                             console.log(`   👤 User: ${withdrawnEvent.user}`);
                             console.log(`   🪙 Token: ${withdrawnEvent.token}`);
                             console.log(`   💰 Amount: ${formattedWithdrawAmount}`);
+                            console.log(`   🏦 New Balance: ${formattedWithdrawBalance}`);
                             console.log(`   📉 Action: User withdrew tokens from vault`);
                             break;
 
                         case 'BalanceSlashed':
                             const slashedEvent = event as BalanceSlashedEvent;
                             const formattedSlashAmount = formatTokenAmount(slashedEvent.amount, slashedEvent.token, getProvider());
+                            const formattedSlashBalance = formatTokenAmount(slashedEvent.newBalance, slashedEvent.token, getProvider());
 
                             console.log(`   👤 User: ${slashedEvent.user}`);
                             console.log(`   🪙 Token: ${slashedEvent.token}`);
                             console.log(`   💰 Amount: ${formattedSlashAmount}`);
+                            console.log(`   🏦 New Balance: ${formattedSlashBalance}`);
                             console.log(`   🤖 Operator: ${slashedEvent.operator}`);
                             console.log(`   ⚡ Action: Balance slashed by trading contract`);
                             break;
@@ -135,10 +145,12 @@ const main = async () => {
                         case 'BalanceCredited':
                             const creditedEvent = event as BalanceCreditedEvent;
                             const formattedCreditAmount = formatTokenAmount(creditedEvent.amount, creditedEvent.token, getProvider());
+                            const formattedCreditBalance = formatTokenAmount(creditedEvent.newBalance, creditedEvent.token, getProvider());
 
                             console.log(`   👤 User: ${creditedEvent.user}`);
                             console.log(`   🪙 Token: ${creditedEvent.token}`);
                             console.log(`   💰 Amount: ${formattedCreditAmount}`);
+                            console.log(`   🏦 New Balance: ${formattedCreditBalance}`);
                             console.log(`   🤖 Operator: ${creditedEvent.operator}`);
                             console.log(`   🎁 Action: Balance credited by trading contract`);
                             break;
