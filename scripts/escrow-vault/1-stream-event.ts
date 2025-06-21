@@ -6,11 +6,17 @@ import 'dotenv/config'
 import { formatTokenAmount } from "../../utils/erc20-utils";
 
 // Interfaces for formatted EscrowVault events
-interface DepositedEvent {
-    eventName: "Deposited";
+
+interface EvmEvent<T> {
+    eventName: string;
     blockNumber: number;
     transactionHash: string;
     timestamp: number; // in seconds
+    sender: any;
+    args: T;
+}
+
+interface DepositedEvent {
     user: string;
     token: string;
     amount: bigint;
@@ -18,10 +24,6 @@ interface DepositedEvent {
 }
 
 interface WithdrawnEvent {
-    eventName: "Withdrawn";
-    blockNumber: number;
-    transactionHash: string;
-    timestamp: number; // in seconds
     user: string;
     token: string;
     amount: bigint;
@@ -29,10 +31,6 @@ interface WithdrawnEvent {
 }
 
 interface BalanceSlashedEvent {
-    eventName: "BalanceSlashed";
-    blockNumber: number;
-    transactionHash: string;
-    timestamp: number; // in seconds
     user: string;
     token: string;
     amount: bigint;
@@ -41,10 +39,6 @@ interface BalanceSlashedEvent {
 }
 
 interface BalanceCreditedEvent {
-    eventName: "BalanceCredited";
-    blockNumber: number;
-    transactionHash: string;
-    timestamp: number; // in seconds
     user: string;
     token: string;
     amount: bigint;
@@ -60,13 +54,13 @@ const main = async () => {
 
     const getContract = () => {
         return new ethers.BaseContract(
-            process.env.ESCROW_VAULT_CONTRACT || "",
+            process.env.ESCROW_VAULT_ADDRESS || "",
             json.abi,
             getProvider()
         );
     };
 
-    const from = Number(process.env.FROM_BLOCK) || 1;
+    const from = 27371315;
 
     console.log(`   ✅ From block: ${from}`)
 
@@ -106,52 +100,51 @@ const main = async () => {
                     // Event-specific logging with proper type checking
                     switch (event.eventName) {
                         case 'Deposited':
-                            const depositedEvent = event as DepositedEvent;
-                            const formattedDepositAmount = formatTokenAmount(depositedEvent.amount, depositedEvent.token, getProvider());
-                            const formattedDepositBalance = formatTokenAmount(depositedEvent.newBalance, depositedEvent.token, getProvider());
+                            const depositedEvent = event as EvmEvent<DepositedEvent>;
+                            console.log("Deposited event:", depositedEvent);
+                            const formattedDepositAmount = await formatTokenAmount(depositedEvent.args.amount, depositedEvent.args.token, getProvider());
+                            const formattedDepositBalance = await formatTokenAmount(depositedEvent.args.newBalance, depositedEvent.args.token, getProvider());
 
-                            console.log(`   👤 User: ${depositedEvent.user}`);
-                            console.log(`   🪙 Token: ${depositedEvent.token}`);
+                            console.log(`   👤 User: ${depositedEvent.args.user}`);
+                            console.log(`   🪙 Token: ${depositedEvent.args.token}`);
                             console.log(`   💰 Amount: ${formattedDepositAmount}`);
                             console.log(`   🏦 New Balance: ${formattedDepositBalance}`);
                             console.log(`   📈 Action: User deposited tokens into vault`);
                             break;
 
                         case 'Withdrawn':
-                            const withdrawnEvent = event as WithdrawnEvent;
-                            const formattedWithdrawAmount = formatTokenAmount(withdrawnEvent.amount, withdrawnEvent.token, getProvider());
-                            const formattedWithdrawBalance = formatTokenAmount(withdrawnEvent.newBalance, withdrawnEvent.token, getProvider());
+                            const withdrawnEvent = event as EvmEvent<WithdrawnEvent>;
+                            const formattedWithdrawAmount = await formatTokenAmount(withdrawnEvent.args.amount, withdrawnEvent.args.token, getProvider());
+                            const formattedWithdrawBalance = await formatTokenAmount(withdrawnEvent.args.newBalance, withdrawnEvent.args.token, getProvider());
 
-                            console.log(`   👤 User: ${withdrawnEvent.user}`);
-                            console.log(`   🪙 Token: ${withdrawnEvent.token}`);
+                            console.log(`   👤 User: ${withdrawnEvent.args.user}`);
+                            console.log(`   🪙 Token: ${withdrawnEvent.args.token}`);
                             console.log(`   💰 Amount: ${formattedWithdrawAmount}`);
                             console.log(`   🏦 New Balance: ${formattedWithdrawBalance}`);
                             console.log(`   📉 Action: User withdrew tokens from vault`);
                             break;
 
                         case 'BalanceSlashed':
-                            const slashedEvent = event as BalanceSlashedEvent;
-                            const formattedSlashAmount = formatTokenAmount(slashedEvent.amount, slashedEvent.token, getProvider());
-                            const formattedSlashBalance = formatTokenAmount(slashedEvent.newBalance, slashedEvent.token, getProvider());
-
-                            console.log(`   👤 User: ${slashedEvent.user}`);
-                            console.log(`   🪙 Token: ${slashedEvent.token}`);
+                            const slashedEvent = event as EvmEvent<BalanceSlashedEvent>;
+                            const formattedSlashAmount = await formatTokenAmount(slashedEvent.args.amount, slashedEvent.args.token, getProvider());
+                            const formattedSlashBalance = await formatTokenAmount(slashedEvent.args.newBalance, slashedEvent.args.token, getProvider());
+                            console.log(`   🪙 Token: ${slashedEvent.args.token}`);
                             console.log(`   💰 Amount: ${formattedSlashAmount}`);
                             console.log(`   🏦 New Balance: ${formattedSlashBalance}`);
-                            console.log(`   🤖 Operator: ${slashedEvent.operator}`);
+                            console.log(`   🤖 Operator: ${slashedEvent.args.operator}`);
                             console.log(`   ⚡ Action: Balance slashed by trading contract`);
                             break;
 
                         case 'BalanceCredited':
-                            const creditedEvent = event as BalanceCreditedEvent;
-                            const formattedCreditAmount = formatTokenAmount(creditedEvent.amount, creditedEvent.token, getProvider());
-                            const formattedCreditBalance = formatTokenAmount(creditedEvent.newBalance, creditedEvent.token, getProvider());
+                            const creditedEvent = event as EvmEvent<BalanceCreditedEvent>;
+                            const formattedCreditAmount = await formatTokenAmount(creditedEvent.args.amount, creditedEvent.args.token, getProvider());
+                            const formattedCreditBalance = await formatTokenAmount(creditedEvent.args.newBalance, creditedEvent.args.token, getProvider());
 
-                            console.log(`   👤 User: ${creditedEvent.user}`);
-                            console.log(`   🪙 Token: ${creditedEvent.token}`);
+                            console.log(`   👤 User: ${creditedEvent.args.user}`);
+                            console.log(`   🪙 Token: ${creditedEvent.args.token}`);
                             console.log(`   💰 Amount: ${formattedCreditAmount}`);
                             console.log(`   🏦 New Balance: ${formattedCreditBalance}`);
-                            console.log(`   🤖 Operator: ${creditedEvent.operator}`);
+                            console.log(`   🤖 Operator: ${creditedEvent.args.operator}`);
                             console.log(`   🎁 Action: Balance credited by trading contract`);
                             break;
 
