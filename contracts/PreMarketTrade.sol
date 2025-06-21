@@ -549,6 +549,7 @@ contract PreMarketTrade is
             trade.filledAmount,
             trade.buyer.price
         );
+        uint256 buyerFee = _calculateBuyerFee(trade.filledAmount);
 
         // UPDATE STATE FIRST (Reentrancy protection)
         trades[tradeId].settled = true;
@@ -559,12 +560,30 @@ contract PreMarketTrade is
             .buyerCollateral + trade.sellerCollateral);
 
         // EXTERNAL CALLS LAST
-        // Transfer target token from seller to buyer
+        // Transfer target token from seller to buyer (trừ buyer fee)
+        uint256 buyerReceives = trade.filledAmount - buyerFee;
         IERC20(targetToken).safeTransferFrom(
             trade.seller.trader,
             trade.buyer.trader,
-            trade.filledAmount
+            buyerReceives
         );
+
+        // Transfer buyer fee to treasury (target token)
+        if (buyerFee > 0 && treasury != address(0)) {
+            IERC20(targetToken).safeTransferFrom(
+                trade.seller.trader,
+                treasury,
+                buyerFee
+            );
+
+            emit ProtocolFeeCollected(
+                tradeId,
+                targetToken,
+                treasury,
+                buyerFee,
+                "settle_buyer"
+            );
+        }
 
         // Release collateral and pay rewards (trừ protocol fee)
         uint256 totalRelease = trade.buyerCollateral +
@@ -577,7 +596,7 @@ contract PreMarketTrade is
             totalRelease
         );
 
-        // Transfer protocol fee to treasury
+        // Transfer protocol fee to treasury (collateral token)
         if (protocolFee > 0 && treasury != address(0)) {
             vault.transferOut(
                 trade.buyer.collateralToken,
@@ -590,7 +609,7 @@ contract PreMarketTrade is
                 trade.buyer.collateralToken,
                 treasury,
                 protocolFee,
-                "settle"
+                "settle_seller"
             );
         }
 
@@ -643,10 +662,13 @@ contract PreMarketTrade is
         uint256 penaltyAmount = sellerPenalty > trade.sellerCollateral
             ? trade.sellerCollateral
             : sellerPenalty;
-        uint256 protocolFee = _calculateProtocolFee(
+        
+        // Protocol fee gấp đôi để tương đương economic với settle (seller fee + buyer fee)
+        uint256 baseFee = _calculateProtocolFee(
             trade.filledAmount,
             trade.buyer.price
         );
+        uint256 totalProtocolFee = baseFee * 2; // 2x để tương đương settle
 
         // UPDATE STATE FIRST
         trades[tradeId].settled = true;
@@ -656,21 +678,30 @@ contract PreMarketTrade is
             .buyerCollateral + trade.sellerCollateral);
 
         // EXTERNAL CALLS LAST
-        // Calculate distributions (protocol fee từ seller penalty)
-        uint256 actualPenaltyAmount = penaltyAmount > protocolFee
-            ? penaltyAmount - protocolFee
+        // Calculate distributions - protocol fee được lấy từ tổng collateral pool
+        uint256 totalCollateral = trade.buyerCollateral + trade.sellerCollateral;
+        uint256 availableForDistribution = totalCollateral > totalProtocolFee 
+            ? totalCollateral - totalProtocolFee 
             : 0;
+        
+        // Penalty amount từ available collateral (after protocol fee)
+        uint256 maxPenalty = availableForDistribution > trade.buyerCollateral 
+            ? availableForDistribution - trade.buyerCollateral 
+            : 0;
+        uint256 actualPenaltyAmount = penaltyAmount > maxPenalty 
+            ? maxPenalty 
+            : penaltyAmount;
 
-        // Return buyer collateral + penalty (after protocol fee)
+        // Return buyer collateral + penalty
         vault.transferOut(
             trade.buyer.collateralToken,
             trade.buyer.trader,
             trade.buyerCollateral + actualPenaltyAmount
         );
 
-        // Return remaining seller collateral (if any)
-        uint256 sellerRemaining = trade.sellerCollateral > penaltyAmount
-            ? trade.sellerCollateral - penaltyAmount
+        // Return remaining seller collateral
+        uint256 sellerRemaining = availableForDistribution > (trade.buyerCollateral + actualPenaltyAmount)
+            ? availableForDistribution - (trade.buyerCollateral + actualPenaltyAmount)
             : 0;
         if (sellerRemaining > 0) {
             vault.transferOut(
@@ -681,18 +712,18 @@ contract PreMarketTrade is
         }
 
         // Transfer protocol fee to treasury
-        if (protocolFee > 0 && treasury != address(0)) {
+        if (totalProtocolFee > 0 && treasury != address(0)) {
             vault.transferOut(
                 trade.buyer.collateralToken,
                 treasury,
-                protocolFee
+                totalProtocolFee
             );
 
             emit ProtocolFeeCollected(
                 tradeId,
                 trade.buyer.collateralToken,
                 treasury,
-                protocolFee,
+                totalProtocolFee,
                 "cancel"
             );
         }
@@ -962,6 +993,23 @@ contract PreMarketTrade is
     }
 
     /**
+     * @notice Calculate buyer fee based on filled amount (target token)
+     * @dev Internal function để tính buyer fee bằng target token khi settle
+     * @param filledAmount Số lượng token buyer nhận được
+     * @return buyerFeeAmount Buyer fee amount (in target token)
+     */
+    function _calculateBuyerFee(
+        uint256 filledAmount
+    ) internal view returns (uint256 buyerFeeAmount) {
+        if (protocolFeeBps == 0 || treasury == address(0)) {
+            return 0;
+        }
+
+        buyerFeeAmount = (filledAmount * protocolFeeBps) / 10000;
+        return buyerFeeAmount;
+    }
+
+    /**
      * @dev Validate tính tương thích của hai orders với enhanced checks
      */
     function _validateOrdersCompatibility(
@@ -1150,12 +1198,13 @@ contract PreMarketTrade is
 
     /**
      * @notice Update protocol fee - NEW ADMIN FUNCTION
+     * @dev Áp dụng cho cả collateral fee (seller) và target token fee (buyer)
      * @param newFeeBps New fee in basis points (max 100 = 1%)
      */
     function setProtocolFee(
         uint256 newFeeBps
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (newFeeBps > 100) revert InvalidRewardParameters(); // Max 1%
+        if (newFeeBps > 1000) revert InvalidRewardParameters(); // Max 10%
         protocolFeeBps = newFeeBps;
     }
 
