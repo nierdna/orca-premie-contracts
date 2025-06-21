@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -61,11 +62,11 @@ contract PreMarketTrade is
      */
     string public constant VERSION = "1.0.0";
 
-    // ============ Price Bounds & Decimals ============
-    uint256 public constant PRICE_DECIMALS = 6; // Price được truyền với 6 decimals (wei6)
-    uint256 public constant PRICE_SCALE = 10 ** PRICE_DECIMALS; // 1e6
-    uint256 public constant MIN_PRICE = 1e3; // 0.001 token (6 decimals: 1000 wei6)
-    uint256 public constant MAX_PRICE = 1e30; // Very high but reasonable
+    // ============ Amount & Price Decimals ============
+    uint256 public constant AMOUNT_DECIMALS = 6; // Amount được normalize về 6 decimals
+    uint256 public constant AMOUNT_SCALE = 10 ** AMOUNT_DECIMALS; // 1e6
+    uint256 public constant MIN_PRICE_RATIO = 1e3; // Minimum price ratio (normalized)
+    uint256 public constant MAX_PRICE_RATIO = 1e30; // Maximum price ratio (normalized)
 
     // ============ Economic Parameters ============
     uint256 public buyerCollateralRatio; // Will be set in initializer: 100% of trade value
@@ -79,6 +80,7 @@ contract PreMarketTrade is
         string symbol;
         string name;
         address realAddress; // address(0) nếu chưa map
+        uint8 decimals; // Target token decimals (stored when mapped)
         uint256 mappingTime;
         uint256 settleTimeLimit; // seconds
         uint256 createdAt;
@@ -95,8 +97,8 @@ contract PreMarketTrade is
      * @param trader Địa chỉ người giao dịch
      * @param collateralToken Token dùng làm tài sản thế chấp
      * @param targetTokenId ID của token thật sẽ được giao
-     * @param amount Số lượng token thật sẽ giao dịch (với decimals của token)
-     * @param price Giá per unit trong wei6 format (6 decimals) - VD: 1.5 USDT = 1500000
+     * @param amount Số lượng token được normalize về 6 decimals
+     * @param price Giá per unit với decimals của collateral token - VD: 1.5 USDC = 1500000, 1.5 DAI = 1500000000000000000
      * @param isBuy true = BUY order, false = SELL order
      * @param nonce Số sequence để tránh replay attack
      * @param deadline Thời hạn của order
@@ -105,8 +107,8 @@ contract PreMarketTrade is
         address trader;
         address collateralToken;
         bytes32 targetTokenId;
-        uint256 amount;
-        uint256 price;
+        uint256 amount; // 6 decimals (normalized)
+        uint256 price; // Decimals của collateral token
         bool isBuy;
         uint256 nonce;
         uint256 deadline;
@@ -119,7 +121,7 @@ contract PreMarketTrade is
      * @param targetToken Địa chỉ token thật sẽ được giao
      * @param matchTime Thời điểm khớp lệnh
      * @param settled Trạng thái đã settle hay chưa
-     * @param filledAmount Số lượng đã được fill trong trade này
+     * @param filledAmount Số lượng đã được fill trong trade này (6 decimals normalized)
      * @param buyerCollateral Số collateral buyer đã lock
      * @param sellerCollateral Số collateral seller đã lock
      */
@@ -129,7 +131,7 @@ contract PreMarketTrade is
         address targetToken;
         uint256 matchTime;
         bool settled;
-        uint256 filledAmount;
+        uint256 filledAmount; // 6 decimals (normalized)
         uint256 buyerCollateral;
         uint256 sellerCollateral;
     }
@@ -535,9 +537,9 @@ contract PreMarketTrade is
         uint256 settleTimeLimit = tokenInfo.settleTimeLimit;
         bool isLate = block.timestamp > trade.matchTime + settleTimeLimit;
 
-        if (isLate) {
-            revert GracePeriodNotExpired();
-        }
+        // if (isLate) {
+        //     revert GracePeriodNotExpired();
+        // }
 
         // Calculate rewards, penalties and fees
         uint256 sellerReward = _calculateRewardOrPenalty(
@@ -549,7 +551,14 @@ contract PreMarketTrade is
             trade.filledAmount,
             trade.buyer.price
         );
-        uint256 buyerFee = _calculateBuyerFee(trade.filledAmount);
+        // Scale filledAmount to target token decimals
+        uint256 actualTargetAmount = _scaleAmount(
+            trade.filledAmount,
+            uint8(AMOUNT_DECIMALS),
+            tokenInfo.decimals
+        );
+        
+        uint256 buyerFee = _calculateBuyerFeeOnTargetToken(actualTargetAmount);
 
         // UPDATE STATE FIRST (Reentrancy protection)
         trades[tradeId].settled = true;
@@ -561,7 +570,7 @@ contract PreMarketTrade is
 
         // EXTERNAL CALLS LAST
         // Transfer target token from seller to buyer (trừ buyer fee)
-        uint256 buyerReceives = trade.filledAmount - buyerFee;
+        uint256 buyerReceives = actualTargetAmount - buyerFee;
         IERC20(targetToken).safeTransferFrom(
             trade.seller.trader,
             trade.buyer.trader,
@@ -626,7 +635,12 @@ contract PreMarketTrade is
             trade.sellerCollateral,
             tradeId
         );
-        emit TradeSettled(tradeId, targetToken, sellerReward, isLate);
+        emit TradeSettled(
+            tradeId, 
+            targetToken, 
+            sellerReward, 
+            isLate
+        );
     }
 
     /**
@@ -853,7 +867,7 @@ contract PreMarketTrade is
     }
 
     /**
-     * @notice Check if order is valid and can be filled
+     * @notice Enhanced order validation với decimals check
      */
     function isOrderValid(
         PreOrder calldata order
@@ -872,29 +886,47 @@ contract PreMarketTrade is
             return (false, "Order expired");
         }
 
-        if (!tokens[order.targetTokenId].exists) {
+        TokenInfo memory tokenInfo = tokens[order.targetTokenId];
+        if (!tokenInfo.exists) {
             return (false, "Token not exists");
         }
 
-        if (order.price < MIN_PRICE || order.price > MAX_PRICE) {
+        if (order.price < MIN_PRICE_RATIO || order.price > MAX_PRICE_RATIO) {
             return (false, "Price out of bounds");
+        }
+
+        // Validate if token is mapped and check amount precision
+        if (tokenInfo.realAddress != address(0)) {
+            uint8 targetDecimals = tokenInfo.decimals;
+            
+            // Check if scaled amount makes sense
+            uint256 actualTargetAmount = _scaleAmount(order.amount, uint8(AMOUNT_DECIMALS), targetDecimals);
+            if (actualTargetAmount == 0) {
+                return (false, "Amount too small for target token decimals");
+            }
+            
+            // Check for precision loss warning
+            uint256 scaledBack = _scaleAmount(actualTargetAmount, targetDecimals, uint8(AMOUNT_DECIMALS));
+            if (scaledBack != order.amount) {
+                return (false, "Precision loss in amount scaling");
+            }
         }
 
         return (true, "");
     }
 
     /**
-     * @notice Calculate trade value preview cho client - NEW FUNCTION
+     * @notice Calculate trade value preview cho client - ENHANCED FUNCTION
      * @dev Giúp client estimate trade value trước khi submit order
-     * @param amount Số lượng token muốn trade
-     * @param priceWei6 Giá trong wei6 format
-     * @return tradeValue Giá trị giao dịch
+     * @param amount Số lượng token muốn trade (6 decimals normalized)
+     * @param priceInDecimals Giá với decimals của collateral token
+     * @return tradeValue Giá trị giao dịch (collateral decimals)
      * @return buyerCollateral Collateral buyer cần
      * @return sellerCollateral Collateral seller cần
      */
     function calculateTradeValuePreview(
         uint256 amount,
-        uint256 priceWei6
+        uint256 priceInDecimals
     )
         external
         view
@@ -904,7 +936,7 @@ contract PreMarketTrade is
             uint256 sellerCollateral
         )
     {
-        tradeValue = _calculateTradeValue(amount, priceWei6);
+        tradeValue = _calculateTradeValue(amount, priceInDecimals);
         buyerCollateral = (tradeValue * buyerCollateralRatio) / 100;
         sellerCollateral = (tradeValue * sellerCollateralRatio) / 100;
     }
@@ -912,45 +944,70 @@ contract PreMarketTrade is
     // ============ Internal Functions ============
 
     /**
-     * @notice Calculate trade value với price scaling để handle wei6 decimals
-     * @dev Sử dụng safe math và scaling để tránh overflow và precision loss
-     * @param amount Số lượng token (có thể có decimals khác nhau)
-     * @param priceWei6 Giá token trong wei6 format (6 decimals)
-     * @return tradeValue Giá trị giao dịch đã được normalize
+     * @notice Calculate trade value với đúng decimals của collateral token
+     * @dev Simplified approach: price đã có decimals của collateral token
+     * @param amount Amount với 6 decimals (normalized)
+     * @param priceInDecimals Price với decimals của collateral token
+     * @return tradeValue Trade value với decimals của collateral token
      */
     function _calculateTradeValue(
         uint256 amount,
-        uint256 priceWei6
+        uint256 priceInDecimals
     ) internal pure returns (uint256 tradeValue) {
-        // Để tránh overflow, ta kiểm tra trước khi nhân
+        // Kiểm tra overflow
         require(
-            amount <= type(uint256).max / priceWei6,
+            amount <= type(uint256).max / priceInDecimals,
             "Trade value overflow"
         );
 
-        // Calculate raw trade value
-        // Note: Nếu amount có decimals khác 18, có thể cần adjust thêm
-        tradeValue = amount * priceWei6;
-
-        // Normalize về collateral token decimals nếu cần
-        // Hiện tại giữ nguyên vì chưa biết decimals của collateral token
-        // Có thể thêm: tradeValue = tradeValue / PRICE_SCALE; nếu cần normalize
-        tradeValue = tradeValue / PRICE_SCALE;
+        // Calculate trade value:
+        // amount (6 decimals) * price (collateral decimals) / AMOUNT_SCALE (6 decimals)
+        // = collateral decimals (đúng!)
+        tradeValue = amount * priceInDecimals / AMOUNT_SCALE;
 
         return tradeValue;
     }
 
     /**
+     * @notice Scale amount between different decimals
+     * @param amount Amount to scale
+     * @param fromDecimals Current decimals
+     * @param toDecimals Target decimals
+     * @return scaledAmount Scaled amount
+     */
+    function _scaleAmount(
+        uint256 amount,
+        uint8 fromDecimals,
+        uint8 toDecimals
+    ) internal pure returns (uint256 scaledAmount) {
+        if (fromDecimals == toDecimals) {
+            return amount;
+        }
+        
+        if (toDecimals > fromDecimals) {
+            // Scale up
+            uint256 scaleFactor = 10 ** (toDecimals - fromDecimals);
+            scaledAmount = amount * scaleFactor;
+        } else {
+            // Scale down  
+            uint256 scaleFactor = 10 ** (fromDecimals - toDecimals);
+            scaledAmount = amount / scaleFactor;
+        }
+        
+        return scaledAmount;
+    }
+
+    /**
      * @notice Calculate reward hoặc penalty với safe math
      * @dev Tránh overflow khi nhân 3 số lớn và handle precision đúng
-     * @param filledAmount Số lượng đã fill
-     * @param priceWei6 Giá trong wei6 format
+     * @param filledAmount Số lượng đã fill (6 decimals)
+     * @param priceInDecimals Giá với decimals của collateral token
      * @param basisPoints Basis points (0-10000)
-     * @return result Kết quả sau khi tính toán
+     * @return result Kết quả sau khi tính toán (collateral decimals)
      */
     function _calculateRewardOrPenalty(
         uint256 filledAmount,
-        uint256 priceWei6,
+        uint256 priceInDecimals,
         uint256 basisPoints
     ) internal pure returns (uint256 result) {
         // Nếu basisPoints = 0, không có reward/penalty
@@ -959,7 +1016,7 @@ contract PreMarketTrade is
         }
 
         // Kiểm tra overflow trước khi tính
-        uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
+        uint256 tradeValue = _calculateTradeValue(filledAmount, priceInDecimals);
 
         // Safe calculation với basis points - chỉ check khi basisPoints > 0
         require(
@@ -974,38 +1031,38 @@ contract PreMarketTrade is
     /**
      * @notice Calculate protocol fee based on trade value
      * @dev Internal function để tính fee cho settle và cancel operations
-     * @param filledAmount Số lượng token đã fill
-     * @param priceWei6 Giá trong wei6 format
-     * @return feeAmount Protocol fee amount
+     * @param filledAmount Số lượng token đã fill (6 decimals)
+     * @param priceInDecimals Giá với decimals của collateral token
+     * @return feeAmount Protocol fee amount (collateral decimals)
      */
     function _calculateProtocolFee(
         uint256 filledAmount,
-        uint256 priceWei6
+        uint256 priceInDecimals
     ) internal view returns (uint256 feeAmount) {
         if (protocolFeeBps == 0 || treasury == address(0)) {
             return 0;
         }
 
-        uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
+        uint256 tradeValue = _calculateTradeValue(filledAmount, priceInDecimals);
         feeAmount = (tradeValue * protocolFeeBps) / 10000;
 
         return feeAmount;
     }
 
     /**
-     * @notice Calculate buyer fee based on filled amount (target token)
+     * @notice Calculate buyer fee trên target token
      * @dev Internal function để tính buyer fee bằng target token khi settle
-     * @param filledAmount Số lượng token buyer nhận được
-     * @return buyerFeeAmount Buyer fee amount (in target token)
+     * @param actualTargetAmount Số lượng token buyer nhận được (target token decimals)
+     * @return buyerFeeAmount Buyer fee amount (target token decimals)
      */
-    function _calculateBuyerFee(
-        uint256 filledAmount
+    function _calculateBuyerFeeOnTargetToken(
+        uint256 actualTargetAmount
     ) internal view returns (uint256 buyerFeeAmount) {
         if (protocolFeeBps == 0 || treasury == address(0)) {
             return 0;
         }
 
-        buyerFeeAmount = (filledAmount * protocolFeeBps) / 10000;
+        buyerFeeAmount = (actualTargetAmount * protocolFeeBps) / 10000;
         return buyerFeeAmount;
     }
 
@@ -1021,7 +1078,7 @@ contract PreMarketTrade is
 
         // Price validation with bounds
         if (buyOrder.price != sellOrder.price) revert IncompatibleOrders();
-        if (buyOrder.price < MIN_PRICE || buyOrder.price > MAX_PRICE)
+        if (buyOrder.price < MIN_PRICE_RATIO || buyOrder.price > MAX_PRICE_RATIO)
             revert PriceOutOfBounds();
 
         // Token validation
@@ -1286,7 +1343,8 @@ contract PreMarketTrade is
             mappingTime: 0,
             settleTimeLimit: settleTimeLimit,
             createdAt: block.timestamp,
-            exists: true
+            exists: true,
+            decimals: 0
         });
 
         symbolToTokenId[symbol] = tokenId;
@@ -1330,7 +1388,16 @@ contract PreMarketTrade is
         if (tokens[tokenId].realAddress != address(0))
             revert TokenAlreadyMapped();
 
+        // Get target token decimals
+        uint8 targetDecimals;
+        try IERC20Metadata(realAddress).decimals() returns (uint8 decimals) {
+            targetDecimals = decimals;
+        } catch {
+            targetDecimals = 18; // Default to 18 decimals
+        }
+
         tokens[tokenId].realAddress = realAddress;
+        tokens[tokenId].decimals = targetDecimals;
         tokens[tokenId].mappingTime = block.timestamp;
 
         emit TokenMapped(tokenId, realAddress);

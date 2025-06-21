@@ -14,52 +14,6 @@ interface SettleTradeConfig {
 const DECIMALS = 6;
 
 /**
- * @notice Map token với real address trước khi settle
- */
-async function mapTokenToRealAddress(
-    tokenId: string,
-    realAddress: string,
-    adminSigner: any,
-    contractAddress: string
-) {
-    console.log("🗺️ Mapping token to real address...");
-
-    const preMarketTrade = await ethers.getContractAt("PreMarketTrade", contractAddress);
-
-    try {
-        // Check if token exists
-        const tokenInfo = await preMarketTrade.tokens(tokenId);
-        if (!tokenInfo.exists) {
-            throw new Error(`Token ${tokenId} không tồn tại`);
-        }
-
-        console.log(`🎯 Token Info: ${tokenInfo.symbol} (${tokenInfo.name})`);
-
-        // Check if already mapped
-        if (tokenInfo.realAddress !== "0x0000000000000000000000000000000000000000") {
-            console.log(`⚠️ Token đã được map với address: ${tokenInfo.realAddress}`);
-            return tokenInfo.realAddress;
-        }
-
-        // Map token
-        const tx = await (preMarketTrade as any).connect(adminSigner).mapTokenToRealAddress(
-            tokenId,
-            realAddress
-        );
-
-        console.log("📤 Mapping transaction sent:", tx.hash);
-        await tx.wait();
-
-        console.log("✅ Token mapped successfully!");
-        return realAddress;
-
-    } catch (error: any) {
-        console.error("❌ Error mapping token:", error.message);
-        throw error;
-    }
-}
-
-/**
  * @notice Settle một trade cụ thể
  */
 async function settleTrade(config: SettleTradeConfig) {
@@ -105,12 +59,7 @@ async function settleTrade(config: SettleTradeConfig) {
 
         if (mappedAddress === "0x0000000000000000000000000000000000000000") {
             console.log("🗺️ Token chưa được map, đang thực hiện mapping...");
-            mappedAddress = await mapTokenToRealAddress(
-                tradeInfo.buyer.targetTokenId,
-                config.targetTokenAddress,
-                admin,
-                CONTRACT_ADDRESS
-            );
+            throw new Error("Token chưa được map");
         } else {
             console.log(`✅ Token đã được map với address: ${mappedAddress}`);
         }
@@ -229,6 +178,18 @@ async function settleTrade(config: SettleTradeConfig) {
     } catch (error: any) {
         console.error("❌ Error settling trade:");
         console.error(error.message);
+        if (error.data) {
+            console.error("Raw Error Data:", error.data);
+
+            try {
+                const errorInterface = preMarketTrade.interface;
+                const decodedError = errorInterface.parseError(error.data);
+                console.error("🎯 Decoded Custom Error:", decodedError!.name);
+                console.error("📋 Error Arguments:", decodedError!.args);
+            } catch (parseError) {
+                console.error("Could not decode error data");
+            }
+        }
 
         if (error.reason) {
             console.error("Reason:", error.reason);
@@ -278,7 +239,7 @@ async function main() {
     // Example configurations
     const examples: SettleTradeConfig[] = [
         {
-            tradeId: "7",
+            tradeId: "14",
             targetTokenAddress: "0xd01ceeEa03fbadfA1B5aa5C1891a683c02f38C8f" // Replace with real token address
         },
         {
@@ -303,7 +264,7 @@ async function main() {
 }
 
 // Export functions for use in other scripts
-export { settleTrade, settleMultipleTrades, mapTokenToRealAddress, SettleTradeConfig };
+export { settleTrade, settleMultipleTrades, SettleTradeConfig };
 
 // Run if called directly
 if (require.main === module) {

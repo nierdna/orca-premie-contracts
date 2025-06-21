@@ -149,7 +149,7 @@ async function main() {
         //     settleTimeLimitDays: 30
         // },
         {
-            symbol: "DEGEN-V3",
+            symbol: "DEGEN-V" + Math.floor(Math.random() * 1000000),
             name: "Degen Protocol V2",
             settleTimeLimitDays: 1 / 24 / 60 * 2 // 2 minutes
         },

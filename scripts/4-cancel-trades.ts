@@ -331,7 +331,7 @@ async function main() {
     // Example configurations for trade cancellation
     const tradeExamples: CancelTradeConfig[] = [
         {
-            tradeId: "6",
+            tradeId: "15",
             reason: "Seller failed to deliver tokens on time"
         },
         {
