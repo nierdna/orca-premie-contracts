@@ -20,17 +20,17 @@ import "./EscrowVault.sol";
  * @author Blockchain Expert
  * @custom:security-contact security@premarket.trade
  */
-contract PreMarketTrade is 
+contract PreMarketTrade is
     Initializable,
-    AccessControlUpgradeable, 
-    ReentrancyGuardUpgradeable, 
-    EIP712Upgradeable, 
+    AccessControlUpgradeable,
+    ReentrancyGuardUpgradeable,
+    EIP712Upgradeable,
     PausableUpgradeable,
-    UUPSUpgradeable 
+    UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
-    
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -39,39 +39,40 @@ contract PreMarketTrade is
     // ============ Constants ============
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
-    bytes32 public constant PREORDER_TYPEHASH = keccak256(
-        "PreOrder(address trader,address collateralToken,bytes32 targetTokenId,uint256 amount,uint256 price,bool isBuy,uint256 nonce,uint256 deadline)"
-    );
+    bytes32 public constant PREORDER_TYPEHASH =
+        keccak256(
+            "PreOrder(address trader,address collateralToken,bytes32 targetTokenId,uint256 amount,uint256 price,bool isBuy,uint256 nonce,uint256 deadline)"
+        );
 
     // ============ State Variables ============
     uint256 public tradeCounter;
     uint256 public tokenIdCounter; // Prevent hash collision
-    
+
     /**
      * @notice Reference đến EscrowVault contract
      * @dev Vault quản lý balance nội bộ thay vì transferFrom trực tiếp
      * @dev Không thể dùng immutable trong upgradeable contracts
      */
     EscrowVault public vault;
-    
+
     /**
      * @notice Contract version for upgrade tracking
      * @dev Increment này mỗi lần upgrade
      */
     string public constant VERSION = "1.0.0";
-    
+
     // ============ Price Bounds & Decimals ============
     uint256 public constant PRICE_DECIMALS = 6; // Price được truyền với 6 decimals (wei6)
-    uint256 public constant PRICE_SCALE = 10**PRICE_DECIMALS; // 1e6
+    uint256 public constant PRICE_SCALE = 10 ** PRICE_DECIMALS; // 1e6
     uint256 public constant MIN_PRICE = 1e3; // 0.001 token (6 decimals: 1000 wei6)
     uint256 public constant MAX_PRICE = 1e30; // Very high but reasonable
-    
+
     // ============ Economic Parameters ============
     uint256 public buyerCollateralRatio; // Will be set in initializer: 100% of trade value
     uint256 public sellerCollateralRatio; // Will be set in initializer: 100% of trade value (asymmetric)
     uint256 public sellerRewardBps; // Will be set in initializer: 0% reward for fulfilling
     uint256 public latePenaltyBps; // Will be set in initializer: 100% penalty for late settlement
-    
+
     // ============ Token Market ============
     struct TokenInfo {
         bytes32 tokenId;
@@ -88,7 +89,7 @@ contract PreMarketTrade is
     mapping(string => bytes32) public symbolToTokenId; // Prevent duplicate symbols
 
     // ============ Structs ============
-    
+
     /**
      * @notice Cấu trúc đơn hàng pre-market
      * @param trader Địa chỉ người giao dịch
@@ -136,26 +137,38 @@ contract PreMarketTrade is
     // ============ Storage ============
     mapping(uint256 => MatchedTrade) public trades;
     mapping(bytes32 => bool) public usedOrderHashes; // Track used order hashes instead of nonces
-    
+
     // ============ PARTIAL FILL TRACKING ============
     /**
      * @notice Track filled amount cho mỗi order
      * @dev orderHash => filled amount
-     */    
+     */
     mapping(bytes32 => uint256) public orderFilled;
-    
+
     /**
      * @notice Minimum fill amount để tránh dust orders
      */
     uint256 public minimumFillAmount; // Will be set in initializer: 0.001 token default
-    
+
     /**
      * @notice Track total locked collateral per token (keep for protocol monitoring)
      */
     mapping(address => uint256) public totalLockedCollateral;
 
+    // ============ FEE PARAMETERS ============
+    /**
+     * @notice Protocol fee trong basis points (max 100 = 1%)
+     * @dev Thu fee từ cả settle và cancel operations
+     */
+    uint256 public protocolFeeBps; // Will be set in initializer: 50 (0.5%)
+
+    /**
+     * @notice Treasury address để nhận protocol fees
+     */
+    address public treasury; // Will be set in initializer
+
     // ============ Events ============
-    
+
     /**
      * @notice Phát ra khi có lệnh được khớp thành công
      */
@@ -180,7 +193,7 @@ contract PreMarketTrade is
      * @notice Phát ra khi giao dịch được settle
      */
     event TradeSettled(
-        uint256 indexed tradeId, 
+        uint256 indexed tradeId,
         address indexed targetToken,
         uint256 sellerReward,
         bool isLate
@@ -190,7 +203,7 @@ contract PreMarketTrade is
      * @notice Phát ra khi buyer cancel giao dịch do seller không fulfill
      */
     event TradeCancelled(
-        uint256 indexed tradeId, 
+        uint256 indexed tradeId,
         address indexed buyer,
         uint256 penaltyAmount,
         address indexed collateralToken
@@ -216,30 +229,27 @@ contract PreMarketTrade is
     );
 
     event TokenMarketCreated(
-        bytes32 indexed tokenId, 
-        string symbol, 
-        string name, 
+        bytes32 indexed tokenId,
+        string symbol,
+        string name,
         uint256 settleTimeLimit
     );
-    
+
     event SettleTimeUpdated(
-        bytes32 indexed tokenId, 
-        uint256 oldSettleTime, 
+        bytes32 indexed tokenId,
+        uint256 oldSettleTime,
         uint256 newSettleTime
     );
 
-    event TokenMapped(
-        bytes32 indexed tokenId,
-        address indexed realAddress
-    );
-    
+    event TokenMapped(bytes32 indexed tokenId, address indexed realAddress);
+
     event CollateralRatioUpdated(
         uint256 oldBuyerRatio,
         uint256 newBuyerRatio,
         uint256 oldSellerRatio,
         uint256 newSellerRatio
     );
-    
+
     event EconomicParametersUpdated(
         uint256 sellerRewardBps,
         uint256 latePenaltyBps
@@ -263,6 +273,17 @@ contract PreMarketTrade is
         address indexed oldImplementation,
         address indexed newImplementation,
         string version
+    );
+
+    /**
+     * @notice Phát ra khi protocol fee được collect
+     */
+    event ProtocolFeeCollected(
+        uint256 indexed tradeId,
+        address indexed collateralToken,
+        address indexed treasury,
+        uint256 feeAmount,
+        string operation
     );
 
     // ============ Errors ============
@@ -291,33 +312,42 @@ contract PreMarketTrade is
     error SelfTrade();
 
     // ============ Initializer ============
-    
+
     /**
      * @notice Initialize contract với domain separator cho EIP-712 và vault address
      * @param _vault Địa chỉ của EscrowVault contract
      * @param _admin Địa chỉ admin sẽ nhận các role
+     * @param _treasury Địa chỉ treasury để nhận fees (có thể là address(0) để disable fee)
      */
-    function initialize(address _vault, address _admin) public initializer {
+    function initialize(
+        address _vault,
+        address _admin,
+        address _treasury
+    ) public initializer {
         if (_vault == address(0)) revert InvalidTokenAddress();
         if (_admin == address(0)) revert InvalidTokenAddress();
-        
+
         // Initialize parent contracts
         __AccessControl_init();
         __ReentrancyGuard_init();
         __EIP712_init("PreMarketTrade", "1");
         __Pausable_init();
         __UUPSUpgradeable_init();
-        
+
         // Set vault (can't use immutable in upgradeable contracts)
         vault = EscrowVault(_vault);
-        
+
         // Initialize economic parameters (moved from declaration to fix upgrade safety)
         buyerCollateralRatio = 100; // 100% of trade value
         sellerCollateralRatio = 100; // 100% of trade value (asymmetric)
         sellerRewardBps = 0; // 0% reward for fulfilling
         latePenaltyBps = 10000; // 100% penalty for late settlement
         minimumFillAmount = 1e3; // 0.001 token default
-        
+
+        // Initialize fee parameters
+        protocolFeeBps = 50; // 0.5% default fee
+        treasury = _treasury; // Can be address(0) to disable fees
+
         // Grant roles to admin
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(RELAYER_ROLE, _admin);
@@ -330,7 +360,7 @@ contract PreMarketTrade is
      * @notice Khớp hai lệnh buy/sell hợp lệ với partial fill support
      * @dev Chỉ relayer được phép gọi function này
      * @param buyOrder Order của buyer
-     * @param sellOrder Order của seller  
+     * @param sellOrder Order của seller
      * @param fillAmount Số lượng muốn fill (0 = auto calculate max possible)
      * @return tradeId ID của giao dịch mới tạo
      */
@@ -338,21 +368,31 @@ contract PreMarketTrade is
         PreOrder calldata buyOrder,
         PreOrder calldata sellOrder,
         uint256 fillAmount
-    ) external onlyRole(RELAYER_ROLE) nonReentrant whenNotPaused returns (uint256 tradeId) {
+    )
+        external
+        onlyRole(RELAYER_ROLE)
+        nonReentrant
+        whenNotPaused
+        returns (uint256 tradeId)
+    {
         // Basic validations
         _validateOrdersCompatibility(buyOrder, sellOrder);
         // _verifySignature(buyOrder, sigBuy);
         // _verifySignature(sellOrder, sigSell);
-        
+
         // Calculate and validate fill amount
-        uint256 actualFillAmount = _calculateFillAmount(buyOrder, sellOrder, fillAmount);
+        uint256 actualFillAmount = _calculateFillAmount(
+            buyOrder,
+            sellOrder,
+            fillAmount
+        );
         if (actualFillAmount == 0) revert InvalidFillAmount();
         if (actualFillAmount < minimumFillAmount) revert BelowMinimumFill();
-        
+
         // Process the fill
         return _processFill(buyOrder, sellOrder, actualFillAmount);
     }
-    
+
     /**
      * @dev Internal function to process the actual fill - FIXED REENTRANCY PATTERN
      */
@@ -363,17 +403,24 @@ contract PreMarketTrade is
     ) internal virtual returns (uint256 tradeId) {
         // Cache order hashes to save gas
         bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
-        bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
-        
+        bytes32 sellOrderHash = _hashTypedDataV4(
+            _getOrderStructHash(sellOrder)
+        );
+
         // Calculate collateral amounts with price scaling (price is wei6)
-        uint256 tradeValue = _calculateTradeValue(actualFillAmount, buyOrder.price);
-        uint256 buyerCollateralAmount = (tradeValue * buyerCollateralRatio) / 100;
-        uint256 sellerCollateralAmount = (tradeValue * sellerCollateralRatio) / 100;
-        
+        uint256 tradeValue = _calculateTradeValue(
+            actualFillAmount,
+            buyOrder.price
+        );
+        uint256 buyerCollateralAmount = (tradeValue * buyerCollateralRatio) /
+            100;
+        uint256 sellerCollateralAmount = (tradeValue * sellerCollateralRatio) /
+            100;
+
         // UPDATE STATE FIRST (Reentrancy protection)
         orderFilled[buyOrderHash] += actualFillAmount;
         orderFilled[sellOrderHash] += actualFillAmount;
-        
+
         // Check if orders are fully filled, then mark as used
         if (orderFilled[buyOrderHash] == buyOrder.amount) {
             usedOrderHashes[buyOrderHash] = true;
@@ -381,10 +428,12 @@ contract PreMarketTrade is
         if (orderFilled[sellOrderHash] == sellOrder.amount) {
             usedOrderHashes[sellOrderHash] = true;
         }
-        
+
         // Update total collateral tracking (keep for protocol monitoring)
-        totalLockedCollateral[buyOrder.collateralToken] += buyerCollateralAmount + sellerCollateralAmount;
-        
+        totalLockedCollateral[buyOrder.collateralToken] +=
+            buyerCollateralAmount +
+            sellerCollateralAmount;
+
         // Create trade record
         tradeId = ++tradeCounter;
         trades[tradeId] = MatchedTrade({
@@ -397,24 +446,42 @@ contract PreMarketTrade is
             buyerCollateral: buyerCollateralAmount,
             sellerCollateral: sellerCollateralAmount
         });
-        
+
         // EXTERNAL CALLS LAST (After state updates)
-        vault.slashBalance(buyOrder.trader, buyOrder.collateralToken, buyerCollateralAmount);
-        vault.slashBalance(sellOrder.trader, sellOrder.collateralToken, sellerCollateralAmount);
-        
+        vault.slashBalance(
+            buyOrder.trader,
+            buyOrder.collateralToken,
+            buyerCollateralAmount
+        );
+        vault.slashBalance(
+            sellOrder.trader,
+            sellOrder.collateralToken,
+            sellerCollateralAmount
+        );
+
         // Emit events
-        emit CollateralLocked(buyOrder.trader, buyOrder.collateralToken, buyerCollateralAmount, tradeId);
-        emit CollateralLocked(sellOrder.trader, sellOrder.collateralToken, sellerCollateralAmount, tradeId);
-        
+        emit CollateralLocked(
+            buyOrder.trader,
+            buyOrder.collateralToken,
+            buyerCollateralAmount,
+            tradeId
+        );
+        emit CollateralLocked(
+            sellOrder.trader,
+            sellOrder.collateralToken,
+            sellerCollateralAmount,
+            tradeId
+        );
+
         emit OrdersMatched(
-            tradeId, 
-            buyOrderHash, 
-            sellOrderHash, 
-            buyOrder.trader, 
-            sellOrder.trader, 
+            tradeId,
+            buyOrderHash,
+            sellOrderHash,
+            buyOrder.trader,
+            sellOrder.trader,
             buyOrder.targetTokenId,
-            buyOrder.amount, 
-            buyOrder.price, 
+            buyOrder.amount,
+            buyOrder.price,
             buyOrder.collateralToken,
             actualFillAmount,
             orderFilled[buyOrderHash],
@@ -422,7 +489,7 @@ contract PreMarketTrade is
             buyerCollateralAmount,
             sellerCollateralAmount
         );
-        
+
         // Emit partial fill events if needed
         if (orderFilled[buyOrderHash] < buyOrder.amount) {
             emit OrderPartiallyFilled(
@@ -432,7 +499,7 @@ contract PreMarketTrade is
                 buyOrder.amount - orderFilled[buyOrderHash]
             );
         }
-        
+
         if (orderFilled[sellOrderHash] < sellOrder.amount) {
             emit OrderPartiallyFilled(
                 sellOrderHash,
@@ -451,52 +518,95 @@ contract PreMarketTrade is
     function settle(uint256 tradeId) external nonReentrant whenNotPaused {
         // Cache trade to memory for gas optimization
         MatchedTrade memory trade = trades[tradeId];
-        
+
         // Validations
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.seller.trader) revert OnlySellerCanSettle();
-        
+
         // Get token info và verify đã được mapped
         TokenInfo memory tokenInfo = tokens[trade.buyer.targetTokenId];
         if (!tokenInfo.exists) revert TokenNotExists();
         if (tokenInfo.realAddress == address(0)) revert TokenAlreadyMapped(); // Reuse error, means "not mapped yet"
-        
+
         address targetToken = tokenInfo.realAddress;
-        
+
         // Check grace period
         uint256 settleTimeLimit = tokenInfo.settleTimeLimit;
         bool isLate = block.timestamp > trade.matchTime + settleTimeLimit;
-        
+
         if (isLate) {
             revert GracePeriodNotExpired();
         }
-        
-        // Calculate rewards and penalties with safe price scaling
-        uint256 sellerReward = _calculateRewardOrPenalty(trade.filledAmount, trade.buyer.price, sellerRewardBps);
-        
+
+        // Calculate rewards, penalties and fees
+        uint256 sellerReward = _calculateRewardOrPenalty(
+            trade.filledAmount,
+            trade.buyer.price,
+            sellerRewardBps
+        );
+        uint256 protocolFee = _calculateProtocolFee(
+            trade.filledAmount,
+            trade.buyer.price
+        );
+
         // UPDATE STATE FIRST (Reentrancy protection)
         trades[tradeId].settled = true;
         trades[tradeId].targetToken = targetToken;
-        
+
         // Update total collateral tracking
-        totalLockedCollateral[trade.buyer.collateralToken] -= (trade.buyerCollateral + trade.sellerCollateral);
-        
+        totalLockedCollateral[trade.buyer.collateralToken] -= (trade
+            .buyerCollateral + trade.sellerCollateral);
+
         // EXTERNAL CALLS LAST
         // Transfer target token from seller to buyer
         IERC20(targetToken).safeTransferFrom(
-            trade.seller.trader, 
-            trade.buyer.trader, 
+            trade.seller.trader,
+            trade.buyer.trader,
             trade.filledAmount
         );
-        
-        // Release collateral and pay rewards
-        uint256 totalRelease = trade.buyerCollateral + trade.sellerCollateral + sellerReward;
-        vault.transferOut(trade.buyer.collateralToken, trade.seller.trader, totalRelease);
-        
+
+        // Release collateral and pay rewards (trừ protocol fee)
+        uint256 totalRelease = trade.buyerCollateral +
+            trade.sellerCollateral +
+            sellerReward -
+            protocolFee;
+        vault.transferOut(
+            trade.buyer.collateralToken,
+            trade.seller.trader,
+            totalRelease
+        );
+
+        // Transfer protocol fee to treasury
+        if (protocolFee > 0 && treasury != address(0)) {
+            vault.transferOut(
+                trade.buyer.collateralToken,
+                treasury,
+                protocolFee
+            );
+
+            emit ProtocolFeeCollected(
+                tradeId,
+                trade.buyer.collateralToken,
+                treasury,
+                protocolFee,
+                "settle"
+            );
+        }
+
         // Emit events
-        emit CollateralUnlocked(trade.buyer.trader, trade.buyer.collateralToken, trade.buyerCollateral, tradeId);
-        emit CollateralUnlocked(trade.seller.trader, trade.buyer.collateralToken, trade.sellerCollateral, tradeId);
+        emit CollateralUnlocked(
+            trade.buyer.trader,
+            trade.buyer.collateralToken,
+            trade.buyerCollateral,
+            tradeId
+        );
+        emit CollateralUnlocked(
+            trade.seller.trader,
+            trade.buyer.collateralToken,
+            trade.sellerCollateral,
+            tradeId
+        );
         emit TradeSettled(tradeId, targetToken, sellerReward, isLate);
     }
 
@@ -505,46 +615,107 @@ contract PreMarketTrade is
      * @dev Chỉ buyer mới có thể cancel và chỉ sau khi grace period hết hạn
      * @param tradeId ID của giao dịch cần cancel
      */
-    function cancelAfterGracePeriod(uint256 tradeId) external nonReentrant whenNotPaused {
+    function cancelAfterGracePeriod(
+        uint256 tradeId
+    ) external nonReentrant whenNotPaused {
         // Cache trade to memory
         MatchedTrade memory trade = trades[tradeId];
-        
+
         // Validations
         if (trade.buyer.trader == address(0)) revert TradeNotFound();
         if (trade.settled) revert TradeAlreadySettled();
         if (msg.sender != trade.buyer.trader) revert OnlyBuyerCanCancel();
-        
+
         TokenInfo memory tokenInfo = tokens[trade.buyer.targetTokenId];
         if (!tokenInfo.exists) revert TokenNotExists();
-        
+
         uint256 settleTimeLimit = tokenInfo.settleTimeLimit;
         if (block.timestamp <= trade.matchTime + settleTimeLimit) {
             revert GracePeriodNotExpired();
         }
-        
-        // Calculate penalty for seller with safe price scaling
-        uint256 sellerPenalty = _calculateRewardOrPenalty(trade.filledAmount, trade.buyer.price, latePenaltyBps);
-        uint256 penaltyAmount = sellerPenalty > trade.sellerCollateral ? trade.sellerCollateral : sellerPenalty;
-        
+
+        // Calculate penalty and fee
+        uint256 sellerPenalty = _calculateRewardOrPenalty(
+            trade.filledAmount,
+            trade.buyer.price,
+            latePenaltyBps
+        );
+        uint256 penaltyAmount = sellerPenalty > trade.sellerCollateral
+            ? trade.sellerCollateral
+            : sellerPenalty;
+        uint256 protocolFee = _calculateProtocolFee(
+            trade.filledAmount,
+            trade.buyer.price
+        );
+
         // UPDATE STATE FIRST
         trades[tradeId].settled = true;
-        
+
         // Update total collateral tracking
-        totalLockedCollateral[trade.buyer.collateralToken] -= (trade.buyerCollateral + trade.sellerCollateral);
-        
+        totalLockedCollateral[trade.buyer.collateralToken] -= (trade
+            .buyerCollateral + trade.sellerCollateral);
+
         // EXTERNAL CALLS LAST
-        // Return buyer collateral + penalty from seller
-        vault.transferOut(trade.buyer.collateralToken, trade.buyer.trader, trade.buyerCollateral + penaltyAmount);
-        
+        // Calculate distributions (protocol fee từ seller penalty)
+        uint256 actualPenaltyAmount = penaltyAmount > protocolFee
+            ? penaltyAmount - protocolFee
+            : 0;
+
+        // Return buyer collateral + penalty (after protocol fee)
+        vault.transferOut(
+            trade.buyer.collateralToken,
+            trade.buyer.trader,
+            trade.buyerCollateral + actualPenaltyAmount
+        );
+
         // Return remaining seller collateral (if any)
-        if (trade.sellerCollateral > penaltyAmount) {
-            vault.transferOut(trade.buyer.collateralToken, trade.seller.trader, trade.sellerCollateral - penaltyAmount);
+        uint256 sellerRemaining = trade.sellerCollateral > penaltyAmount
+            ? trade.sellerCollateral - penaltyAmount
+            : 0;
+        if (sellerRemaining > 0) {
+            vault.transferOut(
+                trade.buyer.collateralToken,
+                trade.seller.trader,
+                sellerRemaining
+            );
         }
-        
+
+        // Transfer protocol fee to treasury
+        if (protocolFee > 0 && treasury != address(0)) {
+            vault.transferOut(
+                trade.buyer.collateralToken,
+                treasury,
+                protocolFee
+            );
+
+            emit ProtocolFeeCollected(
+                tradeId,
+                trade.buyer.collateralToken,
+                treasury,
+                protocolFee,
+                "cancel"
+            );
+        }
+
         // Emit events
-        emit CollateralUnlocked(trade.buyer.trader, trade.buyer.collateralToken, trade.buyerCollateral, tradeId);
-        emit CollateralUnlocked(trade.seller.trader, trade.buyer.collateralToken, trade.sellerCollateral, tradeId);
-        emit TradeCancelled(tradeId, trade.buyer.trader, penaltyAmount, trade.buyer.collateralToken);
+        emit CollateralUnlocked(
+            trade.buyer.trader,
+            trade.buyer.collateralToken,
+            trade.buyerCollateral,
+            tradeId
+        );
+        emit CollateralUnlocked(
+            trade.seller.trader,
+            trade.buyer.collateralToken,
+            trade.sellerCollateral,
+            tradeId
+        );
+        emit TradeCancelled(
+            tradeId,
+            trade.buyer.trader,
+            actualPenaltyAmount,
+            trade.buyer.collateralToken
+        );
     }
 
     /**
@@ -558,19 +729,19 @@ contract PreMarketTrade is
     ) external nonReentrant whenNotPaused {
         // Verify signature and ownership
         _verifySignature(order, signature);
-        
+
         if (msg.sender != order.trader) revert InvalidSignature();
-        
+
         bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
-        
+
         // Check if order still has remaining amount
         uint256 remainingAmount = order.amount - orderFilled[orderHash];
         if (remainingAmount == 0) revert OrderAlreadyUsed();
-        
+
         // Mark order as fully used
         usedOrderHashes[orderHash] = true;
         orderFilled[orderHash] = order.amount;
-        
+
         emit OrderCancelled(orderHash, order.trader, remainingAmount);
     }
 
@@ -581,11 +752,9 @@ contract PreMarketTrade is
      * @param tradeId ID của giao dịch
      * @return trade Thông tin giao dịch
      */
-    function getTrade(uint256 tradeId) 
-        external 
-        view 
-        returns (MatchedTrade memory trade) 
-    {
+    function getTrade(
+        uint256 tradeId
+    ) external view returns (MatchedTrade memory trade) {
         return trades[tradeId];
     }
 
@@ -594,11 +763,9 @@ contract PreMarketTrade is
      * @param orderHash Hash của order cần kiểm tra
      * @return used true nếu đã sử dụng
      */
-    function isOrderHashUsed(bytes32 orderHash) 
-        external 
-        view 
-        returns (bool used) 
-    {
+    function isOrderHashUsed(
+        bytes32 orderHash
+    ) external view returns (bool used) {
         return usedOrderHashes[orderHash];
     }
 
@@ -607,37 +774,31 @@ contract PreMarketTrade is
      * @param order Order cần hash
      * @return hash Hash theo chuẩn EIP-712
      */
-    function getOrderHash(PreOrder calldata order) 
-        external 
-        view 
-        returns (bytes32 hash) 
-    {
+    function getOrderHash(
+        PreOrder calldata order
+    ) external view returns (bytes32 hash) {
         return _hashTypedDataV4(_getOrderStructHash(order));
     }
-    
+
     /**
      * @notice Lấy số lượng đã fill của một order
      * @param orderHash Hash của order
      * @return filled Số lượng đã fill
      */
-    function getOrderFilledAmount(bytes32 orderHash) 
-        external 
-        view 
-        returns (uint256 filled) 
-    {
+    function getOrderFilledAmount(
+        bytes32 orderHash
+    ) external view returns (uint256 filled) {
         return orderFilled[orderHash];
     }
-    
+
     /**
      * @notice Lấy số lượng còn lại có thể fill của một order
      * @param order Order cần check
      * @return remaining Số lượng còn lại
      */
-    function getRemainingAmount(PreOrder calldata order) 
-        external 
-        view 
-        returns (uint256 remaining) 
-    {
+    function getRemainingAmount(
+        PreOrder calldata order
+    ) external view returns (uint256 remaining) {
         bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
         return order.amount - orderFilled[orderHash];
     }
@@ -645,55 +806,49 @@ contract PreMarketTrade is
     /**
      * @notice Get token info by ID
      */
-    function getTokenInfo(bytes32 tokenId) 
-        external 
-        view 
-        returns (TokenInfo memory) 
-    {
+    function getTokenInfo(
+        bytes32 tokenId
+    ) external view returns (TokenInfo memory) {
         return tokens[tokenId];
     }
 
     /**
      * @notice Get token ID by symbol
      */
-    function getTokenIdBySymbol(string calldata symbol) 
-        external 
-        view 
-        returns (bytes32) 
-    {
+    function getTokenIdBySymbol(
+        string calldata symbol
+    ) external view returns (bytes32) {
         return symbolToTokenId[symbol];
     }
 
     /**
      * @notice Check if order is valid and can be filled
      */
-    function isOrderValid(PreOrder calldata order) 
-        external 
-        view 
-        returns (bool valid, string memory reason) 
-    {
+    function isOrderValid(
+        PreOrder calldata order
+    ) external view returns (bool valid, string memory reason) {
         bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
-        
+
         if (usedOrderHashes[orderHash]) {
             return (false, "Order already used");
         }
-        
+
         if (orderFilled[orderHash] >= order.amount) {
             return (false, "Order fully filled");
         }
-        
+
         if (block.timestamp > order.deadline) {
             return (false, "Order expired");
         }
-        
+
         if (!tokens[order.targetTokenId].exists) {
             return (false, "Token not exists");
         }
-        
+
         if (order.price < MIN_PRICE || order.price > MAX_PRICE) {
             return (false, "Price out of bounds");
         }
-        
+
         return (true, "");
     }
 
@@ -706,7 +861,10 @@ contract PreMarketTrade is
      * @return buyerCollateral Collateral buyer cần
      * @return sellerCollateral Collateral seller cần
      */
-    function calculateTradeValuePreview(uint256 amount, uint256 priceWei6)
+    function calculateTradeValuePreview(
+        uint256 amount,
+        uint256 priceWei6
+    )
         external
         view
         returns (
@@ -729,23 +887,25 @@ contract PreMarketTrade is
      * @param priceWei6 Giá token trong wei6 format (6 decimals)
      * @return tradeValue Giá trị giao dịch đã được normalize
      */
-    function _calculateTradeValue(uint256 amount, uint256 priceWei6) 
-        internal 
-        pure 
-        returns (uint256 tradeValue) 
-    {
+    function _calculateTradeValue(
+        uint256 amount,
+        uint256 priceWei6
+    ) internal pure returns (uint256 tradeValue) {
         // Để tránh overflow, ta kiểm tra trước khi nhân
-        require(amount <= type(uint256).max / priceWei6, "Trade value overflow");
-        
+        require(
+            amount <= type(uint256).max / priceWei6,
+            "Trade value overflow"
+        );
+
         // Calculate raw trade value
         // Note: Nếu amount có decimals khác 18, có thể cần adjust thêm
         tradeValue = amount * priceWei6;
-        
+
         // Normalize về collateral token decimals nếu cần
         // Hiện tại giữ nguyên vì chưa biết decimals của collateral token
         // Có thể thêm: tradeValue = tradeValue / PRICE_SCALE; nếu cần normalize
         tradeValue = tradeValue / PRICE_SCALE;
-        
+
         return tradeValue;
     }
 
@@ -758,23 +918,47 @@ contract PreMarketTrade is
      * @return result Kết quả sau khi tính toán
      */
     function _calculateRewardOrPenalty(
-        uint256 filledAmount, 
-        uint256 priceWei6, 
+        uint256 filledAmount,
+        uint256 priceWei6,
         uint256 basisPoints
     ) internal pure returns (uint256 result) {
         // Nếu basisPoints = 0, không có reward/penalty
         if (basisPoints == 0) {
             return 0;
         }
-        
+
         // Kiểm tra overflow trước khi tính
         uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
-        
+
         // Safe calculation với basis points - chỉ check khi basisPoints > 0
-        require(tradeValue <= type(uint256).max / basisPoints, "Reward calculation overflow");
-        
+        require(
+            tradeValue <= type(uint256).max / basisPoints,
+            "Reward calculation overflow"
+        );
+
         result = (tradeValue * basisPoints) / 10000;
         return result;
+    }
+
+    /**
+     * @notice Calculate protocol fee based on trade value
+     * @dev Internal function để tính fee cho settle và cancel operations
+     * @param filledAmount Số lượng token đã fill
+     * @param priceWei6 Giá trong wei6 format
+     * @return feeAmount Protocol fee amount
+     */
+    function _calculateProtocolFee(
+        uint256 filledAmount,
+        uint256 priceWei6
+    ) internal view returns (uint256 feeAmount) {
+        if (protocolFeeBps == 0 || treasury == address(0)) {
+            return 0;
+        }
+
+        uint256 tradeValue = _calculateTradeValue(filledAmount, priceWei6);
+        feeAmount = (tradeValue * protocolFeeBps) / 10000;
+
+        return feeAmount;
     }
 
     /**
@@ -786,26 +970,32 @@ contract PreMarketTrade is
     ) internal view {
         // Basic order type validation
         if (!buyOrder.isBuy || sellOrder.isBuy) revert IncompatibleOrders();
-        
+
         // Price validation with bounds
         if (buyOrder.price != sellOrder.price) revert IncompatibleOrders();
-        if (buyOrder.price < MIN_PRICE || buyOrder.price > MAX_PRICE) revert PriceOutOfBounds();
-        
+        if (buyOrder.price < MIN_PRICE || buyOrder.price > MAX_PRICE)
+            revert PriceOutOfBounds();
+
         // Token validation
-        if (buyOrder.collateralToken != sellOrder.collateralToken) revert IncompatibleOrders();
-        if (buyOrder.targetTokenId != sellOrder.targetTokenId) revert IncompatibleOrders();
-        
+        if (buyOrder.collateralToken != sellOrder.collateralToken)
+            revert IncompatibleOrders();
+        if (buyOrder.targetTokenId != sellOrder.targetTokenId)
+            revert IncompatibleOrders();
+
         // Time validation
-        if (block.timestamp > buyOrder.deadline || block.timestamp > sellOrder.deadline) {
+        if (
+            block.timestamp > buyOrder.deadline ||
+            block.timestamp > sellOrder.deadline
+        ) {
             revert OrderExpired();
         }
-        
+
         // Amount validation
         if (buyOrder.amount == 0 || sellOrder.amount == 0) revert ZeroAmount();
-        
+
         // Self-trade prevention
         if (buyOrder.trader == sellOrder.trader) revert SelfTrade();
-        
+
         // Token existence validation
         if (!tokens[buyOrder.targetTokenId].exists) revert TokenNotExists();
     }
@@ -819,23 +1009,29 @@ contract PreMarketTrade is
         uint256 requestedFillAmount
     ) internal view returns (uint256 actualFillAmount) {
         bytes32 buyOrderHash = _hashTypedDataV4(_getOrderStructHash(buyOrder));
-        bytes32 sellOrderHash = _hashTypedDataV4(_getOrderStructHash(sellOrder));
-        
+        bytes32 sellOrderHash = _hashTypedDataV4(
+            _getOrderStructHash(sellOrder)
+        );
+
         uint256 buyRemaining = buyOrder.amount - orderFilled[buyOrderHash];
         uint256 sellRemaining = sellOrder.amount - orderFilled[sellOrderHash];
-        
+
         if (buyRemaining == 0 || sellRemaining == 0) {
             return 0;
         }
-        
-        uint256 maxFillAmount = buyRemaining < sellRemaining ? buyRemaining : sellRemaining;
-        
+
+        uint256 maxFillAmount = buyRemaining < sellRemaining
+            ? buyRemaining
+            : sellRemaining;
+
         if (requestedFillAmount == 0) {
             // Auto calculate max possible
             actualFillAmount = maxFillAmount;
         } else {
             // Use requested amount but not exceed max
-            actualFillAmount = requestedFillAmount > maxFillAmount ? maxFillAmount : requestedFillAmount;
+            actualFillAmount = requestedFillAmount > maxFillAmount
+                ? maxFillAmount
+                : requestedFillAmount;
         }
     }
 
@@ -847,39 +1043,40 @@ contract PreMarketTrade is
         bytes calldata signature
     ) internal view {
         bytes32 orderHash = _hashTypedDataV4(_getOrderStructHash(order));
-        
+
         // Check if order hash is already fully used
         if (usedOrderHashes[orderHash]) revert OrderAlreadyUsed();
-        
+
         // Check if order still has remaining amount
         if (orderFilled[orderHash] >= order.amount) revert OrderAlreadyUsed();
-        
+
         // Verify signature
         bytes32 digest = _hashTypedDataV4(_getOrderStructHash(order));
         address signer = digest.recover(signature);
-        
+
         if (signer != order.trader) revert InvalidSignature();
     }
 
     /**
      * @dev Tạo struct hash cho order theo EIP-712
      */
-    function _getOrderStructHash(PreOrder calldata order) 
-        internal 
-        pure 
-        returns (bytes32) 
-    {
-        return keccak256(abi.encode(
-            PREORDER_TYPEHASH,
-            order.trader,
-            order.collateralToken,
-            order.targetTokenId,
-            order.amount,
-            order.price,
-            order.isBuy,
-            order.nonce,
-            order.deadline
-        ));
+    function _getOrderStructHash(
+        PreOrder calldata order
+    ) internal pure returns (bytes32) {
+        return
+            keccak256(
+                abi.encode(
+                    PREORDER_TYPEHASH,
+                    order.trader,
+                    order.collateralToken,
+                    order.targetTokenId,
+                    order.amount,
+                    order.price,
+                    order.isBuy,
+                    order.nonce,
+                    order.deadline
+                )
+            );
     }
 
     // ============ Admin Functions ============
@@ -896,15 +1093,19 @@ contract PreMarketTrade is
      * @notice Xóa relayer
      * @param relayer Địa chỉ relayer
      */
-    function removeRelayer(address relayer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function removeRelayer(
+        address relayer
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _revokeRole(RELAYER_ROLE, relayer);
     }
-    
+
     /**
      * @notice Update minimum fill amount
      * @param newMinimum New minimum fill amount
      */
-    function setMinimumFillAmount(uint256 newMinimum) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMinimumFillAmount(
+        uint256 newMinimum
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         minimumFillAmount = newMinimum;
     }
 
@@ -915,11 +1116,18 @@ contract PreMarketTrade is
         uint256 newBuyerRatio,
         uint256 newSellerRatio
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (newBuyerRatio == 0 || newBuyerRatio > 200) revert InvalidCollateralRatio(); // Max 200%
-        if (newSellerRatio == 0 || newSellerRatio > 200) revert InvalidCollateralRatio(); // Max 200% - FIXED
-        
-        emit CollateralRatioUpdated(buyerCollateralRatio, newBuyerRatio, sellerCollateralRatio, newSellerRatio);
-        
+        if (newBuyerRatio == 0 || newBuyerRatio > 200)
+            revert InvalidCollateralRatio(); // Max 200%
+        if (newSellerRatio == 0 || newSellerRatio > 200)
+            revert InvalidCollateralRatio(); // Max 200% - FIXED
+
+        emit CollateralRatioUpdated(
+            buyerCollateralRatio,
+            newBuyerRatio,
+            sellerCollateralRatio,
+            newSellerRatio
+        );
+
         buyerCollateralRatio = newBuyerRatio;
         sellerCollateralRatio = newSellerRatio;
     }
@@ -933,11 +1141,32 @@ contract PreMarketTrade is
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newSellerRewardBps > 1000) revert InvalidRewardParameters(); // Max 10%
         if (newLatePenaltyBps > 10000) revert InvalidRewardParameters(); // Max 100% - FIXED
-        
+
         sellerRewardBps = newSellerRewardBps;
         latePenaltyBps = newLatePenaltyBps;
-        
+
         emit EconomicParametersUpdated(newSellerRewardBps, newLatePenaltyBps);
+    }
+
+    /**
+     * @notice Update protocol fee - NEW ADMIN FUNCTION
+     * @param newFeeBps New fee in basis points (max 100 = 1%)
+     */
+    function setProtocolFee(
+        uint256 newFeeBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (newFeeBps > 100) revert InvalidRewardParameters(); // Max 1%
+        protocolFeeBps = newFeeBps;
+    }
+
+    /**
+     * @notice Update treasury address - NEW ADMIN FUNCTION
+     * @param newTreasury New treasury address (address(0) = disable fees)
+     */
+    function setTreasury(
+        address newTreasury
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        treasury = newTreasury;
     }
 
     /**
@@ -959,11 +1188,10 @@ contract PreMarketTrade is
      * @param token Địa chỉ token
      * @param amount Số lượng cần rút
      */
-    function emergencyWithdraw(address token, uint256 amount) 
-        external 
-        onlyRole(EMERGENCY_ROLE) 
-        whenPaused
-    {
+    function emergencyWithdraw(
+        address token,
+        uint256 amount
+    ) external onlyRole(EMERGENCY_ROLE) whenPaused {
         IERC20(token).safeTransfer(msg.sender, amount);
     }
 
@@ -975,24 +1203,32 @@ contract PreMarketTrade is
         string calldata name,
         uint256 settleTimeLimit
     ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (bytes32 tokenId) {
-        require(settleTimeLimit >= 15 seconds && settleTimeLimit <= 30 days, "Invalid settle time");
-        require(bytes(symbol).length > 0 && bytes(name).length > 0, "Empty symbol or name");
-        
+        require(
+            settleTimeLimit >= 15 seconds && settleTimeLimit <= 30 days,
+            "Invalid settle time"
+        );
+        require(
+            bytes(symbol).length > 0 && bytes(name).length > 0,
+            "Empty symbol or name"
+        );
+
         // Check for duplicate symbol
         if (symbolToTokenId[symbol] != bytes32(0)) revert DuplicateSymbol();
-        
+
         // Generate unique tokenId with counter to prevent collision
-        tokenId = keccak256(abi.encodePacked(
-            symbol, 
-            name, 
-            block.chainid, 
-            msg.sender, 
-            block.timestamp,
-            ++tokenIdCounter
-        ));
-        
+        tokenId = keccak256(
+            abi.encodePacked(
+                symbol,
+                name,
+                block.chainid,
+                msg.sender,
+                block.timestamp,
+                ++tokenIdCounter
+            )
+        );
+
         require(!tokens[tokenId].exists, "TokenId exists");
-        
+
         tokens[tokenId] = TokenInfo({
             tokenId: tokenId,
             symbol: symbol,
@@ -1003,23 +1239,30 @@ contract PreMarketTrade is
             createdAt: block.timestamp,
             exists: true
         });
-        
+
         symbolToTokenId[symbol] = tokenId;
-        
+
         emit TokenMarketCreated(tokenId, symbol, name, settleTimeLimit);
     }
 
     /**
      * @notice Update settle time với improved validation
      */
-    function updateSettleTime(bytes32 tokenId, uint256 newSettleTime) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateSettleTime(
+        bytes32 tokenId,
+        uint256 newSettleTime
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!tokens[tokenId].exists) revert TokenNotExists();
-        require(newSettleTime >= 1 hours && newSettleTime <= 30 days, "Invalid settle time");
-        if (tokens[tokenId].realAddress != address(0)) revert TokenAlreadyMapped();
-        
+        require(
+            newSettleTime >= 1 hours && newSettleTime <= 30 days,
+            "Invalid settle time"
+        );
+        if (tokens[tokenId].realAddress != address(0))
+            revert TokenAlreadyMapped();
+
         uint256 oldSettleTime = tokens[tokenId].settleTimeLimit;
         tokens[tokenId].settleTimeLimit = newSettleTime;
-        
+
         emit SettleTimeUpdated(tokenId, oldSettleTime, newSettleTime);
     }
 
@@ -1029,14 +1272,18 @@ contract PreMarketTrade is
      * @param tokenId ID của token market
      * @param realAddress Địa chỉ token thật đã deploy
      */
-    function mapToken(bytes32 tokenId, address realAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function mapToken(
+        bytes32 tokenId,
+        address realAddress
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (!tokens[tokenId].exists) revert TokenNotExists();
         if (realAddress == address(0)) revert InvalidTokenAddress();
-        if (tokens[tokenId].realAddress != address(0)) revert TokenAlreadyMapped();
-        
+        if (tokens[tokenId].realAddress != address(0))
+            revert TokenAlreadyMapped();
+
         tokens[tokenId].realAddress = realAddress;
         tokens[tokenId].mappingTime = block.timestamp;
-        
+
         emit TokenMapped(tokenId, realAddress);
     }
 
@@ -1046,32 +1293,31 @@ contract PreMarketTrade is
      * @return mapped true nếu đã mapped
      * @return tokenAddress địa chỉ token thật
      */
-    function isTokenMapped(bytes32 tokenId) 
-        external 
-        view 
-        returns (bool mapped, address tokenAddress) 
-    {
+    function isTokenMapped(
+        bytes32 tokenId
+    ) external view returns (bool mapped, address tokenAddress) {
         TokenInfo memory tokenInfo = tokens[tokenId];
         return (tokenInfo.realAddress != address(0), tokenInfo.realAddress);
     }
 
     // ============ Upgrade Authorization ============
-    
+
     /**
      * @notice Authorize upgrade - chỉ admin mới được upgrade
      * @dev Override từ UUPSUpgradeable để kiểm soát quyền upgrade
      * @param newImplementation Địa chỉ implementation mới
      */
-    function _authorizeUpgrade(address newImplementation) 
-        internal 
-        override 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
-    {
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {
         // Enhanced security checks
         require(newImplementation != address(0), "Invalid implementation");
         require(newImplementation != address(this), "Cannot upgrade to self");
-        require(newImplementation.code.length > 0, "Implementation must be contract");
-        
+        require(
+            newImplementation.code.length > 0,
+            "Implementation must be contract"
+        );
+
         // Emit upgrade event
         address oldImplementation = ERC1967Utils.getImplementation();
         emit ContractUpgraded(oldImplementation, newImplementation, VERSION);
@@ -1081,24 +1327,30 @@ contract PreMarketTrade is
      * @notice Get current implementation address
      * @return implementation Current implementation address
      */
-    function getImplementation() external view returns (address implementation) {
+    function getImplementation()
+        external
+        view
+        returns (address implementation)
+    {
         return ERC1967Utils.getImplementation();
     }
 
     // ============ Storage Gap ============
-    
+
     /**
      * @notice Storage gap để tránh collision khi upgrade
      * @dev Giảm số này khi thêm state variables mới
-     * 
+     *
      * Current state variables:
      * - tradeCounter: 1 slot
-     * - tokenIdCounter: 1 slot  
+     * - tokenIdCounter: 1 slot
      * - vault: 1 slot
      * - buyerCollateralRatio: 1 slot
      * - sellerCollateralRatio: 1 slot
      * - sellerRewardBps: 1 slot
      * - latePenaltyBps: 1 slot
+     * - protocolFeeBps: 1 slot (NEW)
+     * - treasury: 1 slot (NEW)
      * - minimumFillAmount: 1 slot
      * - tokens: 1 slot
      * - symbolToTokenId: 1 slot
@@ -1106,9 +1358,9 @@ contract PreMarketTrade is
      * - usedOrderHashes: 1 slot
      * - orderFilled: 1 slot
      * - totalLockedCollateral: 1 slot
-     * 
-     * Total used: ~14 slots (removed userLockedCollateral)
-     * Reserved: 50 slots (increased from 49)
+     *
+     * Total used: ~16 slots (added 2 new slots)
+     * Reserved: 48 slots (reduced from 50)
      */
-    uint256[50] private __gap;
-} 
+    uint256[48] private __gap;
+}
