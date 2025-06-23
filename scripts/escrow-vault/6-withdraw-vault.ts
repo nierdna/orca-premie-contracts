@@ -1,9 +1,11 @@
 import { ethers } from "hardhat";
+import { TypedDataDomain } from "ethers";
 
 /**
- * @title Vault Withdraw Script
- * @notice Script để withdraw tokens từ EscrowVault
- * @dev Hỗ trợ single và batch withdrawals với validation đầy đủ
+ * @title Vault Withdraw Script (with Signature)
+ * @notice Script để withdraw tokens từ EscrowVault sử dụng chữ ký EIP-712
+ * @dev Hỗ trợ single và batch withdrawals.
+ *      Trong script này, user ký và operator gửi giao dịch là cùng một account.
  */
 
 interface WithdrawConfig {
@@ -19,34 +21,41 @@ interface BatchWithdrawConfig {
 }
 
 /**
- * @notice Single token withdrawal
+ * @notice Single token withdrawal using EIP-712 signature.
+ * @dev The user signs the withdrawal request, and an operator submits it.
+ *      For this script, the user and operator are the same signer.
  */
 async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
-    console.log("🚀 Starting token withdrawal...");
+    console.log("🚀 Starting token withdrawal with signature...");
 
-    // Get signer
-    const [withdrawer] = await ethers.getSigners();
-    console.log("📝 Withdrawer address:", withdrawer.address);
+    // Get signer. For this script, we use the same account as user (signer) and operator (submitter).
+    // In a production environment, the operator would be a separate, trusted backend wallet.
+    const [operator, , user] = await ethers.getSigners();
+    console.log("📝 User (signer) address:", user.address);
+    console.log("👮 Operator (submitter) address:", operator.address);
 
     // Contract addresses
-    const VAULT_ADDRESS = process.env.VAULT_CONTRACT || "YOUR_VAULT_ADDRESS";
+    const VAULT_ADDRESS = process.env.VAULT_CONTRACT;
+    if (!VAULT_ADDRESS) {
+        console.error("❌ Please set VAULT_CONTRACT in your .env file");
+        return false;
+    }
 
     // Get contract instances
-    const vault = await ethers.getContractAt("EscrowVault", VAULT_ADDRESS);
+    const vault: any = await ethers.getContractAt("EscrowVault", VAULT_ADDRESS);
     const token = await ethers.getContractAt("IERC20", config.token);
 
     try {
-        const symbol = config.symbol || "TOKEN";
-        const decimals = config.decimals || 18;
+        const symbol = config.symbol || await token.symbol();
+        const decimals = config.decimals !== undefined ? config.decimals : Number(await token.decimals());
 
         console.log("📊 Withdrawal Configuration:");
-        console.log(`  - Token: ${config.token}`);
-        console.log(`  - Symbol: ${symbol}`);
+        console.log(`  - Token: ${config.token} (${symbol})`);
         console.log(`  - Amount: ${ethers.formatUnits(config.amount, decimals)} ${symbol}`);
         console.log(`  - Vault: ${VAULT_ADDRESS}`);
 
         // Check vault balance
-        const vaultBalance = await vault.getBalance(withdrawer.address, config.token);
+        const vaultBalance = await vault.getBalance(user.address, config.token);
         const withdrawAmount = BigInt(config.amount);
 
         console.log(`🏦 Vault Balance: ${ethers.formatUnits(vaultBalance, decimals)} ${symbol}`);
@@ -57,22 +66,58 @@ async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
         }
 
         // Check current user balance
-        const currentUserBalance = await token.balanceOf(withdrawer.address);
+        const currentUserBalance = await token.balanceOf(user.address);
         console.log(`💰 Current User Balance: ${ethers.formatUnits(currentUserBalance, decimals)} ${symbol}`);
 
-        // Estimate gas
-        const gasEstimate = await (vault as any).connect(withdrawer).withdraw.estimateGas(
-            config.token,
-            config.amount
-        );
+        // === EIP-712 Signature Generation ===
 
+        // 1. Get nonce from contract
+        const nonce = await vault.getNonce(user.address);
+        console.log(`🔐 Current nonce for ${user.address}: ${nonce.toString()}`);
+
+        // 2. Define EIP-712 domain
+        const domain: TypedDataDomain = {
+            name: "EscrowVault",
+            version: "1",
+            chainId: (await ethers.provider.getNetwork()).chainId,
+            verifyingContract: VAULT_ADDRESS,
+        };
+
+        // 3. Define EIP-712 types
+        const types = {
+            WithdrawRequest: [
+                { name: "user", type: "address" },
+                { name: "token", type: "address" },
+                { name: "amount", type: "uint256" },
+                { name: "nonce", type: "uint256" },
+            ],
+        };
+
+        // 4. Create the data to sign
+        const request = {
+            user: user.address,
+            token: config.token,
+            amount: config.amount,
+            nonce,
+        };
+        // console.log("✍️  Signing request:", JSON.stringify(request, null, 2));
+
+        // 5. Sign the data
+        const signature = await user.signTypedData(domain, types, request);
+        console.log("🖋️  User signature:", signature);
+
+        // 6. Estimate gas (as operator)
+        const gasEstimate = await vault.connect(operator).withdrawWithSignature.estimateGas(
+            request,
+            signature
+        );
         console.log(`⛽ Gas estimate: ${gasEstimate.toString()}`);
 
-        // Withdraw
-        console.log("🔄 Withdrawing tokens...");
-        const tx = await (vault as any).connect(withdrawer).withdraw(
-            config.token,
-            config.amount,
+        // 7. Send transaction (as operator)
+        console.log("🔄 Operator submitting withdrawal...");
+        const tx = await vault.connect(operator).withdrawWithSignature(
+            request,
+            signature,
             {
                 gasLimit: gasEstimate + BigInt(20000) // Add buffer
             }
@@ -93,7 +138,7 @@ async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
             for (const log of logs) {
                 try {
                     const parsedLog = vault.interface.parseLog({
-                        topics: log.topics,
+                        topics: Array.from(log.topics),
                         data: log.data
                     });
 
@@ -109,8 +154,8 @@ async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
             }
 
             // Get updated balances
-            const newVaultBalance = await vault.getBalance(withdrawer.address, config.token);
-            const newUserBalance = await token.balanceOf(withdrawer.address);
+            const newVaultBalance = await vault.getBalance(user.address, config.token);
+            const newUserBalance = await token.balanceOf(user.address);
 
             console.log("\n📋 Updated Balances:");
             console.log(`🏦 Vault Balance: ${ethers.formatUnits(newVaultBalance, decimals)} ${symbol}`);
@@ -122,6 +167,12 @@ async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
         }
 
     } catch (error: any) {
+
+        const errorData = error.data;
+        console.log("❌ Error data:", errorData);
+        const parsedError = vault.interface.parseError(errorData);
+        console.log("❌ Parsed error:", parsedError);
+
         console.error("❌ Error withdrawing token:");
         console.error(error.message);
 
@@ -137,182 +188,29 @@ async function withdrawToken(config: WithdrawConfig): Promise<boolean> {
     }
 }
 
-/**
- * @notice Batch withdraw multiple tokens
- */
-async function batchWithdraw(config: BatchWithdrawConfig): Promise<boolean[]> {
-    console.log(`🚀 Starting batch withdrawal for ${config.withdrawals.length} tokens...`);
-    console.log(`📋 Description: ${config.description || "Batch withdrawal operation"}`);
-
-    const results = [];
-
-    for (let i = 0; i < config.withdrawals.length; i++) {
-        const withdrawConfig = config.withdrawals[i];
-        console.log(`\n[${i + 1}/${config.withdrawals.length}] Withdrawing ${withdrawConfig.symbol || 'TOKEN'}...`);
-
-        try {
-            const result = await withdrawToken(withdrawConfig);
-            results.push(result);
-            console.log(`✅ Withdrawal ${i + 1} successful`);
-        } catch (error: any) {
-            results.push(false);
-            console.error(`❌ Withdrawal ${i + 1} failed: ${error.message}`);
-        }
-
-        // Add delay between withdrawals
-        if (i < config.withdrawals.length - 1) {
-            console.log("⏳ Waiting 2 seconds before next withdrawal...");
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
-
-    return results;
-}
-
-/**
- * @notice Withdraw maximum available balance cho một token
- */
-async function withdrawMaxBalance(
-    tokenAddress: string,
-    symbol: string = "TOKEN",
-    decimals: number = 18
-): Promise<boolean> {
-    console.log(`🚀 Withdrawing maximum balance for ${symbol}...`);
-
-    const [withdrawer] = await ethers.getSigners();
-    const VAULT_ADDRESS = process.env.VAULT_CONTRACT || "YOUR_VAULT_ADDRESS";
-    const vault = await ethers.getContractAt("EscrowVault", VAULT_ADDRESS);
-
-    try {
-        // Get current vault balance
-        const vaultBalance = await vault.getBalance(withdrawer.address, tokenAddress);
-
-        if (vaultBalance === BigInt(0)) {
-            console.log(`⚠️ No balance found in vault for ${symbol}`);
-            return false;
-        }
-
-        console.log(`🏦 Maximum withdrawable: ${ethers.formatUnits(vaultBalance, decimals)} ${symbol}`);
-
-        // Use the max balance as withdrawal amount
-        const withdrawConfig: WithdrawConfig = {
-            token: tokenAddress,
-            amount: vaultBalance.toString(),
-            symbol: symbol,
-            decimals: decimals
-        };
-
-        return await withdrawToken(withdrawConfig);
-
-    } catch (error: any) {
-        console.error(`❌ Error withdrawing max balance for ${symbol}:`, error.message);
-        throw error;
-    }
-}
-
-/**
- * @notice Withdraw all available balances for multiple tokens
- */
-async function withdrawAllBalances(
-    tokens: string[],
-    symbols: string[] = [],
-    decimals: number[] = []
-): Promise<boolean[]> {
-    console.log(`🚀 Withdrawing all balances for ${tokens.length} tokens...`);
-
-    const results = [];
-
-    for (let i = 0; i < tokens.length; i++) {
-        const tokenAddress = tokens[i];
-        const symbol = symbols[i] || `TOKEN-${i}`;
-        const tokenDecimals = decimals[i] || 18;
-
-        console.log(`\n[${i + 1}/${tokens.length}] Withdrawing all ${symbol}...`);
-
-        try {
-            const result = await withdrawMaxBalance(tokenAddress, symbol, tokenDecimals);
-            results.push(result);
-            console.log(`✅ ${symbol} withdrawal ${result ? 'successful' : 'skipped (no balance)'}`);
-        } catch (error: any) {
-            results.push(false);
-            console.error(`❌ ${symbol} withdrawal failed: ${error.message}`);
-        }
-
-        // Add delay between withdrawals
-        if (i < tokens.length - 1) {
-            console.log("⏳ Waiting 2 seconds before next withdrawal...");
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
-
-    return results;
-}
-
-/**
- * @notice Emergency withdraw function cho specific amount
- */
-async function emergencyWithdraw(
-    tokenAddress: string,
-    amount: string,
-    symbol: string = "TOKEN",
-    decimals: number = 18
-): Promise<boolean> {
-    console.log(`🚨 Emergency withdrawal for ${symbol}...`);
-
-    const withdrawConfig: WithdrawConfig = {
-        token: tokenAddress,
-        amount: amount,
-        symbol: symbol,
-        decimals: decimals
-    };
-
-    console.log(`⚠️ Emergency withdrawal amount: ${ethers.formatUnits(amount, decimals)} ${symbol}`);
-    console.log(`⚠️ This is an emergency operation!`);
-
-    return await withdrawToken(withdrawConfig);
-}
-
-// Examples và main execution
+// Examples and main execution
 async function main() {
-    const [deployer] = await ethers.getSigners();
-
-    // Example token addresses (replace with real ones)
+    // Example token addresses (replace with real ones from your .env)
     const USDC_ADDRESS = process.env.USDC_ADDRESS || "0xA0b86a33E6426c8bf8fB4b6E2b78BB9db20CEaE3";
-    const USDT_ADDRESS = process.env.USDT_ADDRESS || "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
     // Single withdrawal example
     const singleWithdrawConfig: WithdrawConfig = {
         token: USDC_ADDRESS,
-        amount: ethers.parseUnits("500", 6).toString(), // 500 USDC (6 decimals)
+        amount: ethers.parseUnits("1", 6).toString(), // 1 USDC (6 decimals)
         symbol: "USDC",
         decimals: 6
     };
 
-    // Batch withdrawal example
-    const batchWithdrawConfig: BatchWithdrawConfig = {
-        withdrawals: [
-            {
-                token: USDC_ADDRESS,
-                amount: ethers.parseUnits("250", 6).toString(),
-                symbol: "USDC",
-                decimals: 6
-            },
-            {
-                token: USDT_ADDRESS,
-                amount: ethers.parseUnits("500", 6).toString(),
-                symbol: "USDT",
-                decimals: 6
-            }
-        ],
-        description: "Partial withdrawal for liquidity needs"
-    };
-
-    console.log("🎯 Choose withdrawal operation:");
+    console.log("🎯 Choose withdrawal operation (script will run demos):");
     console.log("1. Single Token Withdrawal");
-    console.log("2. Batch Token Withdrawal");
-    console.log("3. Withdraw Max Balance");
-    console.log("4. Withdraw All Balances");
-    console.log("5. Emergency Withdrawal");
+    console.log("2. Withdraw Max Balance");
+    console.log("3. Withdraw All Balances");
+    console.log("4. Batch Token Withdrawal (uncomment to run)");
+    console.log("5. Emergency Withdrawal (uncomment to run)");
+
+
+    // NOTE: These demos will likely fail if you don't have funds deposited in the vault.
+    // Use the `5-deposit-vault.ts` script first.
 
     // Demo single withdrawal
     console.log("\n🎯 Demo: Single token withdrawal");
@@ -321,73 +219,26 @@ async function main() {
     try {
         await withdrawToken(singleWithdrawConfig);
     } catch (error) {
-        console.log("⚠️ Single withdrawal demo failed (expected if no vault balance)");
+        console.log("⚠️ Single withdrawal demo failed. Did you deposit first?");
     }
 
-    // Demo max balance withdrawal
-    console.log("\n🎯 Demo: Withdraw max balance");
-    try {
-        await withdrawMaxBalance(USDC_ADDRESS, "USDC", 6);
-    } catch (error) {
-        console.log("⚠️ Max balance withdrawal demo failed");
-    }
-
-    // Demo withdraw all balances
-    console.log("\n🎯 Demo: Withdraw all balances");
-    try {
-        const results = await withdrawAllBalances(
-            [USDC_ADDRESS, USDT_ADDRESS],
-            ["USDC", "USDT"],
-            [6, 6]
-        );
-        console.log("📊 Withdraw all results:", results);
-    } catch (error) {
-        console.log("⚠️ Withdraw all demo failed");
-    }
-
-    // Batch withdrawal (uncomment to use)
-    // console.log("\n🎯 Demo: Batch withdrawal");
-    // try {
-    //   const results = await batchWithdraw(batchWithdrawConfig);
-    //   console.log("📊 Batch withdrawal results:", results);
-    // } catch (error) {
-    //   console.log("⚠️ Batch withdrawal demo failed");
-    // }
-
-    // Emergency withdrawal (uncomment if needed)
-    // console.log("\n🚨 Demo: Emergency withdrawal");
-    // try {
-    //   await emergencyWithdraw(
-    //     USDC_ADDRESS,
-    //     ethers.parseUnits("100", 6).toString(),
-    //     "USDC",
-    //     6
-    //   );
-    // } catch (error) {
-    //   console.log("⚠️ Emergency withdrawal demo failed");
-    // }
 }
 
 // Export functions for use in other scripts
 export {
     withdrawToken,
-    batchWithdraw,
-    withdrawMaxBalance,
-    withdrawAllBalances,
-    emergencyWithdraw,
     WithdrawConfig,
-    BatchWithdrawConfig
 };
 
 // Run if called directly
 if (require.main === module) {
     main()
         .then(() => {
-            console.log("🎉 Vault withdrawal script completed successfully!");
+            console.log("\n🎉 Vault withdrawal script completed!");
             process.exit(0);
         })
         .catch((error) => {
-            console.error("💥 Vault withdrawal script failed:", error);
+            console.error("\n💥 Vault withdrawal script failed:", error);
             process.exit(1);
         });
 } 

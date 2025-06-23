@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
  * @title EscrowVault
@@ -12,11 +14,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * @dev Cho phép deposit/withdraw và các contract khác (như PreMarketTrade) có thể slash/credit balance
  * @author Blockchain Expert
  */
-contract EscrowVault is AccessControl, ReentrancyGuard {
+contract EscrowVault is AccessControl, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
     // ============ Constants ============
     bytes32 public constant TRADER_ROLE = keccak256("TRADER_ROLE");
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     // ============ State Variables ============
@@ -32,6 +35,23 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
      * @dev Dùng để reconcile và audit
      */
     mapping(address => uint256) public totalDeposits;
+
+    /**
+     * @notice Nonce của user cho việc ký EIP712 message
+     */
+    mapping(address => uint256) private _nonces;
+
+    // ============ EIP712 Structs & Typehashes ============
+
+    struct WithdrawRequest {
+        address user;
+        address token;
+        uint256 amount;
+        uint256 nonce;
+    }
+
+    bytes32 private constant WITHDRAW_REQUEST_TYPEHASH =
+        keccak256("WithdrawRequest(address user,address token,uint256 amount,uint256 nonce)");
 
     // ============ Events ============
     
@@ -90,15 +110,18 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
     error ZeroAmount();
     error TokenTransferFailed();
     error UnauthorizedTrader();
+    error InvalidSignature();
+    error InvalidNonce();
 
     // ============ Constructor ============
     
     /**
-     * @notice Khởi tạo vault với quyền admin
+     * @notice Khởi tạo vault với quyền admin và operator
      */
-    constructor() {
+    constructor() EIP712("EscrowVault", "1") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
+        _grantRole(OPERATOR_ROLE, msg.sender);
     }
 
     // ============ External Functions ============
@@ -126,26 +149,42 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Withdraw token từ vault về địa chỉ user
-     * @dev Kiểm tra balance nội bộ trước khi cho phép withdraw
-     * @param token Địa chỉ token cần withdraw
-     * @param amount Số lượng token cần withdraw
+     * @notice Rút token từ vault bằng chữ ký của user, được submit bởi một operator
+     * @dev User ký EIP712 message, operator submit giao dịch và trả gas
+     * @param request Struct chứa thông tin withdrawal (user, token, amount, nonce)
+     * @param userSignature Chữ ký EIP712 của user
      */
-    function withdraw(address token, uint256 amount) 
-        external 
-        nonReentrant 
-    {
-        if (amount == 0) revert ZeroAmount();
-        if (balances[msg.sender][token] < amount) revert InsufficientBalance();
+    function withdrawWithSignature(
+        WithdrawRequest calldata request,
+        bytes calldata userSignature
+    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        if (request.amount == 0) revert ZeroAmount();
+        if (balances[request.user][request.token] < request.amount) revert InsufficientBalance();
+        if (_nonces[request.user] != request.nonce) revert InvalidNonce();
+
+        // Verify signature
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(
+            WITHDRAW_REQUEST_TYPEHASH,
+            request.user,
+            request.token,
+            request.amount,
+            request.nonce
+        )));
         
-        // Cập nhật balance nội bộ trước
-        balances[msg.sender][token] -= amount;
-        totalDeposits[token] -= amount;
-        
-        // Transfer token từ vault về user
-        IERC20(token).safeTransfer(msg.sender, amount);
-        
-        emit Withdrawn(msg.sender, token, amount, balances[msg.sender][token]);
+        address signer = ECDSA.recover(digest, userSignature);
+        if (signer != request.user || signer == address(0)) revert InvalidSignature();
+
+        // Increment nonce before state changes
+        _nonces[request.user]++;
+
+        // Update balances
+        balances[request.user][request.token] -= request.amount;
+        totalDeposits[request.token] -= request.amount;
+
+        // Transfer token
+        IERC20(request.token).safeTransfer(request.user, request.amount);
+
+        emit Withdrawn(request.user, request.token, request.amount, balances[request.user][request.token]);
     }
 
     /**
@@ -276,6 +315,15 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
         return balances[user][token] >= amount;
     }
 
+    /**
+     * @notice Lấy nonce hiện tại của một user cho EIP712 signature
+     * @param user Địa chỉ của user
+     * @return uint256 Nonce hiện tại
+     */
+    function getNonce(address user) external view returns (uint256) {
+        return _nonces[user];
+    }
+
     // ============ Admin Functions ============
 
     /**
@@ -292,6 +340,22 @@ contract EscrowVault is AccessControl, ReentrancyGuard {
      */
     function removeTrader(address trader) external onlyRole(ADMIN_ROLE) {
         _revokeRole(TRADER_ROLE, trader);
+    }
+
+    /**
+     * @notice Thêm operator có quyền submit withdrawal transactions
+     * @param operator Địa chỉ của operator/backend
+     */
+    function addOperator(address operator) external onlyRole(ADMIN_ROLE) {
+        _grantRole(OPERATOR_ROLE, operator);
+    }
+
+    /**
+     * @notice Xóa quyền operator
+     * @param operator Địa chỉ của operator/backend
+     */
+    function removeOperator(address operator) external onlyRole(ADMIN_ROLE) {
+        _revokeRole(OPERATOR_ROLE, operator);
     }
 
     /**

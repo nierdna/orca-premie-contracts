@@ -19,7 +19,7 @@ interface BatchDepositConfig {
 }
 
 const getSigner = async () => {
-    const [, , signer] = await ethers.getSigners();
+    const [, signer,] = await ethers.getSigners();
     return signer;
 }
 
@@ -350,8 +350,8 @@ async function main() {
     try {
         await checkVaultBalances(
             deployer.address,
-            [USDC_ADDRESS, USDT_ADDRESS],
-            ["USDC", "USDT"]
+            [USDC_ADDRESS],
+            ["USDC"]
         );
     } catch (error) {
         console.log("⚠️ Balance check demo failed");
