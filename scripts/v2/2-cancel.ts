@@ -197,7 +197,7 @@ async function main() {
     // Dữ liệu này thường đến từ off-chain logic, ví dụ buyer yêu cầu hủy lệnh
     // và operator xác nhận.
     const cancelConfig: CancellationConfig = {
-        orderIds: [ethers.id("ORDER_1"), ethers.id("ORDER_2")],
+        orderIds: [ethers.id("ORDER_3"), ethers.id("ORDER_4")],
         collateralToken: usdcAddress,
         amount: ethers.parseUnits("5", 6).toString(), // Số tiền buyer muốn rút
         deadline: Math.floor(Date.now() / 1000) + 3600, // 1 giờ kể từ bây giờ
