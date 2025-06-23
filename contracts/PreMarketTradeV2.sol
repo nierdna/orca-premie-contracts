@@ -40,36 +40,40 @@ contract PreMarketTradeV2 is
     // ============ Constants ============
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    
+
     // EIP-712 type hashes for operator signatures
-    bytes32 public constant SETTLEMENT_TYPEHASH = 
-        keccak256("Settlement(bytes32[] orderIds,address[] buyers,uint256[] amounts,address collateralToken,address targetToken,uint256 totalPayment,uint256 deadline,uint256 nonce)");
-    
-    bytes32 public constant CANCELLATION_TYPEHASH = 
-        keccak256("Cancellation(bytes32[] orderIds,address buyer,address collateralToken,uint256 amount,uint256 deadline,uint256 nonce)");
+    bytes32 public constant SETTLEMENT_TYPEHASH =
+        keccak256(
+            "Settlement(bytes32[] orderIds,address[] buyers,uint256[] amounts,address collateralToken,address targetToken,uint256 totalPayment,uint256 deadline,uint256 nonce)"
+        );
+
+    bytes32 public constant CANCELLATION_TYPEHASH =
+        keccak256(
+            "Cancellation(bytes32[] orderIds,address buyer,address collateralToken,uint256 amount,uint256 deadline,uint256 nonce)"
+        );
 
     // ============ State Variables ============
-    
+
     /**
      * @notice EscrowVault reference for collateral management
      */
     EscrowVault public vault;
-    
+
     /**
      * @notice Contract version
      */
     string public constant VERSION = "2.0.0-ultra-simple";
-    
+
     /**
      * @notice Protocol fee in basis points (0.5% default)
      */
     uint256 public protocolFeeBps;
-    
+
     /**
      * @notice Treasury address for protocol fees
      */
     address public treasury;
-    
+
     /**
      * @notice Nonce tracking for operator signatures
      */
@@ -82,46 +86,43 @@ contract PreMarketTradeV2 is
      * @dev All verification happens offchain, operator signature ensures legitimacy
      */
     struct SettlementData {
-        bytes32[] orderIds;         // Array of order IDs for offchain sync
-        address[] buyers;           // Array of buyer addresses
-        uint256[] amounts;          // Array of target token amounts for each buyer
-        address collateralToken;    // Token used for payment
-        address targetToken;        // Token being settled
-        uint256 totalPayment;       // Total payment amount from buyers
-        uint256 deadline;           // Settlement deadline
-        uint256 nonce;              // Unique nonce for this settlement
-        bytes operatorSignature;    // Operator's EIP-712 signature authorizing settlement
+        bytes32[] orderIds; // Array of order IDs for offchain sync
+        address[] buyers; // Array of buyer addresses
+        uint256[] amounts; // Array of target token amounts for each buyer
+        address collateralToken; // Token used for payment
+        address targetToken; // Token being settled
+        uint256 totalPayment; // Total payment amount from buyers
+        uint256 deadline; // Settlement deadline
+        uint256 nonce; // Unique nonce for this settlement
+        bytes operatorSignature; // Operator's EIP-712 signature authorizing settlement
     }
 
     /**
      * @notice Cancellation data for buyer refunds
      */
     struct CancellationData {
-        bytes32[] orderIds;         // Array of order IDs for offchain sync
+        bytes32[] orderIds; // Array of order IDs for offchain sync
         address buyer;
         address collateralToken;
         uint256 amount;
         uint256 deadline;
-        uint256 nonce;              // Unique nonce for this cancellation
-        bytes operatorSignature;    // Operator's EIP-712 signature authorizing cancellation
+        uint256 nonce; // Unique nonce for this cancellation
+        bytes operatorSignature; // Operator's EIP-712 signature authorizing cancellation
     }
 
     // ============ Storage ============
-    
-    /**
-     * @notice Track processed settlements to prevent replay
-     */
     mapping(bytes32 => bool) public processedSettlements;
-    
-    /**
-     * @notice Track processed cancellations to prevent replay
-     */
+
     mapping(bytes32 => bool) public processedCancellations;
 
+    /**
+     * @notice Track processed orders to prevent replay
+     */
+    mapping(bytes32 => bool) public processedOrders;
+
     // ============ Events ============
-    
+
     event Settlement(
-        bytes32 indexed settlementHash,
         bytes32[] orderIds,
         address indexed seller,
         address indexed targetToken,
@@ -130,7 +131,7 @@ contract PreMarketTradeV2 is
         uint256 totalPayment,
         uint256 protocolFee
     );
-    
+
     event Cancellation(
         bytes32 indexed cancellationHash,
         bytes32[] orderIds,
@@ -139,7 +140,7 @@ contract PreMarketTradeV2 is
         uint256 amount,
         uint256 protocolFee
     );
-    
+
     event ProtocolFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
     event VaultUpdated(address oldVault, address newVault);
@@ -147,9 +148,8 @@ contract PreMarketTradeV2 is
     // ============ Errors ============
     error InvalidSettlementData();
     error SettlementExpired();
-    error SettlementAlreadyProcessed();
     error CancellationExpired();
-    error CancellationAlreadyProcessed();
+    error OrderAlreadyProcessed();
     error InvalidOperatorSignature();
     error InvalidNonce();
     error UnauthorizedOperator();
@@ -199,25 +199,27 @@ contract PreMarketTradeV2 is
      * @dev All matching/verification logic is offchain, operator signature ensures legitimacy
      * @param data Settlement data containing orderId, buyers, amounts, and operator authorization
      */
-    function settle(SettlementData calldata data) external nonReentrant whenNotPaused {
+    function settle(
+        SettlementData calldata data
+    ) external nonReentrant whenNotPaused {
         // Basic validations
         require(data.orderIds.length > 0, "No order IDs");
         require(data.buyers.length > 0, "No buyers");
-        require(data.buyers.length == data.amounts.length, "Array length mismatch");
-        require(data.orderIds.length == data.buyers.length, "OrderIds and buyers length mismatch");
+        require(
+            data.buyers.length == data.amounts.length,
+            "Array length mismatch"
+        );
+        require(
+            data.orderIds.length == data.buyers.length,
+            "OrderIds and buyers length mismatch"
+        );
         require(data.totalPayment > 0, "Zero payment");
         require(data.deadline >= block.timestamp, "Settlement expired");
         require(data.targetToken != address(0), "Invalid target token");
         require(data.collateralToken != address(0), "Invalid collateral token");
 
         // Verify operator signature
-        bytes32 structHash = _verifySettlementSignature(data);
-
-        // Generate settlement hash
-        require(!processedSettlements[structHash], "Settlement already processed");
-
-        // Mark as processed
-        processedSettlements[structHash] = true;
+        _verifySettlementSignature(data);
 
         // Calculate protocol fee
         uint256 protocolFee = (data.totalPayment * protocolFeeBps) / 10000;
@@ -228,18 +230,23 @@ contract PreMarketTradeV2 is
         for (uint256 i = 0; i < data.buyers.length; i++) {
             require(data.buyers[i] != address(0), "Invalid buyer address");
             require(data.amounts[i] > 0, "Zero amount");
-            
+
+            // Check and mark order as processed
+            bytes32 orderId = data.orderIds[i];
+            require(!processedOrders[orderId], "Order already processed");
+            processedOrders[orderId] = true;
+
             // Calculate buyer fee (deducted from target token)
             uint256 buyerFee = (data.amounts[i] * protocolFeeBps) / 10000;
             uint256 buyerReceives = data.amounts[i] - buyerFee;
-            
+
             // Transfer to buyer
             IERC20(data.targetToken).safeTransferFrom(
                 msg.sender,
                 data.buyers[i],
                 buyerReceives
             );
-            
+
             // Transfer buyer fee to treasury
             if (buyerFee > 0 && treasury != address(0)) {
                 IERC20(data.targetToken).safeTransferFrom(
@@ -248,7 +255,7 @@ contract PreMarketTradeV2 is
                     buyerFee
                 );
             }
-            
+
             totalTargetAmount += data.amounts[i];
         }
 
@@ -261,7 +268,6 @@ contract PreMarketTradeV2 is
         }
 
         emit Settlement(
-            structHash,
             data.orderIds,
             msg.sender,
             data.targetToken,
@@ -274,10 +280,12 @@ contract PreMarketTradeV2 is
 
     /**
      * @notice Cancel trade: buyer withdraws collateral from vault
-     * @dev All cancellation logic/validation is offchain, operator signature ensures legitimacy  
+     * @dev All cancellation logic/validation is offchain, operator signature ensures legitimacy
      * @param data Cancellation data containing orderId, amount and operator authorization
      */
-    function cancel(CancellationData calldata data) external nonReentrant whenNotPaused {
+    function cancel(
+        CancellationData calldata data
+    ) external nonReentrant whenNotPaused {
         // Basic validations
         require(data.orderIds.length > 0, "No order IDs");
         require(data.buyer == msg.sender, "Only buyer can cancel");
@@ -288,10 +296,12 @@ contract PreMarketTradeV2 is
         // Verify operator signature
         bytes32 structHash = _verifyCancellationSignature(data);
 
-        require(!processedCancellations[structHash], "Cancellation already processed");
-
-        // Mark as processed
-        processedCancellations[structHash] = true;
+        // Mark orders as processed
+        for (uint256 i = 0; i < data.orderIds.length; i++) {
+            bytes32 orderId = data.orderIds[i];
+            require(!processedOrders[orderId], "Order already processed");
+            processedOrders[orderId] = true;
+        }
 
         // Calculate protocol fee from cancellation amount
         uint256 protocolFee = (data.amount * protocolFeeBps) / 10000;
@@ -327,21 +337,23 @@ contract PreMarketTradeV2 is
         SettlementData calldata data
     ) internal view returns (bytes32) {
         // Build EIP-712 structured data hash
-        bytes32 structHash = keccak256(abi.encode(
-            SETTLEMENT_TYPEHASH,
-            keccak256(abi.encodePacked(data.orderIds)),
-            keccak256(abi.encodePacked(data.buyers)),
-            keccak256(abi.encodePacked(data.amounts)),
-            data.collateralToken,
-            data.targetToken,
-            data.totalPayment,
-            data.deadline,
-            data.nonce
-        ));
+        bytes32 structHash = keccak256(
+            abi.encode(
+                SETTLEMENT_TYPEHASH,
+                keccak256(abi.encodePacked(data.orderIds)),
+                keccak256(abi.encodePacked(data.buyers)),
+                keccak256(abi.encodePacked(data.amounts)),
+                data.collateralToken,
+                data.targetToken,
+                data.totalPayment,
+                data.deadline,
+                data.nonce
+            )
+        );
 
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = digest.recover(data.operatorSignature);
-        
+
         require(hasRole(OPERATOR_ROLE, signer), "Invalid operator signature");
         return structHash;
     }
@@ -354,19 +366,21 @@ contract PreMarketTradeV2 is
         CancellationData calldata data
     ) internal view returns (bytes32) {
         // Build EIP-712 structured data hash
-        bytes32 structHash = keccak256(abi.encode(
-            CANCELLATION_TYPEHASH,
-            keccak256(abi.encodePacked(data.orderIds)),
-            data.buyer,
-            data.collateralToken,
-            data.amount,
-            data.deadline,
-            data.nonce
-        ));
+        bytes32 structHash = keccak256(
+            abi.encode(
+                CANCELLATION_TYPEHASH,
+                keccak256(abi.encodePacked(data.orderIds)),
+                data.buyer,
+                data.collateralToken,
+                data.amount,
+                data.deadline,
+                data.nonce
+            )
+        );
 
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = digest.recover(data.operatorSignature);
-        
+
         require(hasRole(OPERATOR_ROLE, signer), "Invalid operator signature");
         return structHash;
     }
@@ -376,7 +390,9 @@ contract PreMarketTradeV2 is
     /**
      * @notice Update protocol fee
      */
-    function setProtocolFee(uint256 newFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setProtocolFee(
+        uint256 newFeeBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newFeeBps <= 1000, "Fee too high"); // Max 10%
         uint256 oldFee = protocolFeeBps;
         protocolFeeBps = newFeeBps;
@@ -386,7 +402,9 @@ contract PreMarketTradeV2 is
     /**
      * @notice Update treasury address
      */
-    function setTreasury(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setTreasury(
+        address newTreasury
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         address oldTreasury = treasury;
         treasury = newTreasury;
         emit TreasuryUpdated(oldTreasury, newTreasury);
@@ -399,7 +417,7 @@ contract PreMarketTradeV2 is
     function setVault(address newVault) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newVault != address(0), "Invalid vault address");
         require(newVault != address(vault), "Same vault address");
-        
+
         address oldVault = address(vault);
         vault = EscrowVault(newVault);
         emit VaultUpdated(oldVault, newVault);
@@ -408,7 +426,9 @@ contract PreMarketTradeV2 is
     /**
      * @notice Grant operator role to new address
      */
-    function addOperator(address operator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function addOperator(
+        address operator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(operator != address(0), "Invalid operator");
         _grantRole(OPERATOR_ROLE, operator);
     }
@@ -416,7 +436,9 @@ contract PreMarketTradeV2 is
     /**
      * @notice Revoke operator role from address
      */
-    function removeOperator(address operator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function removeOperator(
+        address operator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _revokeRole(OPERATOR_ROLE, operator);
     }
 
@@ -456,36 +478,10 @@ contract PreMarketTradeV2 is
     // ============ View Functions ============
 
     /**
-     * @notice Check if settlement was processed
+     * @notice Check if an order was processed
      */
-    function isSettlementProcessed(bytes32 settlementHash) external view returns (bool) {
-        return processedSettlements[settlementHash];
-    }
-
-    /**
-     * @notice Check if cancellation was processed
-     */
-    function isCancellationProcessed(bytes32 cancellationHash) external view returns (bool) {
-        return processedCancellations[cancellationHash];
-    }
-
-    /**
-     * @notice Get settlement hash for given data
-     */
-    function getSettlementHash(
-        SettlementData calldata data,
-        address seller
-    ) external view returns (bytes32) {
-        return keccak256(abi.encode(data, seller, block.chainid));
-    }
-
-    /**
-     * @notice Get cancellation hash for given data
-     */
-    function getCancellationHash(
-        CancellationData calldata data
-    ) external view returns (bytes32) {
-        return keccak256(abi.encode(data, block.chainid));
+    function isOrderProcessed(bytes32 orderId) external view returns (bool) {
+        return processedOrders[orderId];
     }
 
     // ============ Upgrade Authorization ============
@@ -501,5 +497,5 @@ contract PreMarketTradeV2 is
     }
 
     // ============ Storage Gap ============
-    uint256[50] private __gap;
-} 
+    uint256[49] private __gap;
+}
